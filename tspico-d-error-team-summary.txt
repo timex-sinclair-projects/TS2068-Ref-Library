@@ -1,0 +1,91 @@
+TS-PICO Intermittent "D" Error — Summary for Team
+===================================================
+
+We've been seeing an intermittent Report D ("BREAK - CONT repeats") error
+during LOAD operations, particularly with larger files but possibly with
+smaller ones too.
+
+ROOT CAUSE HYPOTHESIS
+---------------------
+The D error is triggered by a spurious byte on port $0E during the
+bus switchover from SD card (SPI) communication back to Z80 (PIO)
+communication.
+
+Here's what we believe is happening:
+
+1. The Z80 sends the LOAD command (pre-header + "TPI:filename.tap")
+   to the Pico via port $0E.
+
+2. The Pico acknowledges ($40 $01), then disconnects from the Z80 bus
+   to switch the shared data lines to SPI mode for SD card access.
+
+3. While the Pico talks to the SD card, the Z80 sits in the WF_NPH
+   polling loop, continuously reading port $0E waiting for bit 6 to
+   indicate "continue."
+
+4. The Pico finishes the SD card operation and switches the shared
+   lines back from SPI to PIO mode.
+
+5. PROBLEM: During that switchover, the data lines are likely
+   tri-stated briefly. There is a pullup resistor on D6 of the Z80
+   bus (added at Gustavo's request). When the lines float, D6 gets
+   pulled high.
+
+6. The WF_NPH polling loop uses "BIT 6,A" — it ONLY tests bit 6,
+   ignoring all other bits. So when D6 floats high due to the pullup,
+   the Z80 interprets this as the "continue" signal and exits the
+   polling loop immediately.
+
+7. The Z80 then does its next read from port $0E to get the status
+   byte. But the Pico hasn't driven a valid response yet — the lines
+   are still floating or transitioning. The Z80 reads garbage.
+
+8. The Z80 ROM interprets any status value >= 10 (decimal) as Report D.
+   With D6 pulled high and everything else indeterminate, the read
+   could be $40, $C0, $FF, etc. — all well above 10, triggering the
+   error.
+
+WHY IT'S INTERMITTENT
+---------------------
+The D6 pullup means the Z80 will ALWAYS exit the polling loop as
+soon as the lines float — but whether the subsequent status read
+catches garbage depends on exactly how quickly the Pico drives
+valid data after the switchover. It's a race between the Pico
+reclaiming the bus and the Z80 doing its next IN instruction.
+Larger files take longer on SD, which doesn't directly affect the
+race but may change the bus state at the moment of switchover.
+
+QUESTIONS FOR JEFF/RICARDO (HARDWARE)
+-------------------------------------
+- Can you confirm the data lines are tri-stated during the SPI-to-PIO
+  switchover? If so, for how long?
+- The D6 pullup is the smoking gun — it makes floating bus look like
+  a valid "continue" signal. Are there pullups/pulldowns on any other
+  data lines that would affect what the Z80 reads as the status byte?
+- Is there a way to keep D6 driven low during the switchover so the
+  Z80 stays in the polling loop until the Pico is actually ready?
+
+PROPOSED FIX (FIRMWARE SIDE)
+----------------------------
+The core problem is that the D6 pullup causes the Z80 to exit the
+polling loop the instant the lines float, before the Pico is ready.
+
+Option A (firmware): Before switching the shared lines back from SPI
+to PIO mode, pre-load the PIO output register with the correct
+response. The Pico needs to be driving $01 on the data lines at the
+exact moment (or before) D6 goes high from the pullup. This is tight
+but may be achievable if the PIO is configured before the GPIO mux
+switches.
+
+Option B (firmware): After the SPI transaction completes but BEFORE
+switching GPIO back to PIO, briefly drive D6 low via a regular GPIO
+output to counteract the pullup, then switch to PIO mode with the
+correct value already loaded, then release D6 to let the pullup (or
+the PIO) assert it.
+
+Option C (hardware): Add a pullup to another data line (e.g., D0) so
+that when the bus floats, the Z80 reads $41 (bit 6 + bit 0) which
+would be interpreted as status $01 (OK) with the continue flag set.
+This is a band-aid but would make the float state benign.
+
+— David

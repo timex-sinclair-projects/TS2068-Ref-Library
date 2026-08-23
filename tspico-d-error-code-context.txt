@@ -1,0 +1,111 @@
+TS-PICO Firmware Debug Context — Spurious "D" Error on LOAD
+=============================================================
+
+PROBLEM
+-------
+Intermittent Report D error on the TS-2068 during LOAD operations,
+especially (but not exclusively) with larger files.
+
+WHAT "REPORT D" MEANS FROM THE Z80 SIDE
+----------------------------------------
+The modified EXROM has an error dispatcher at $1BF3 that receives the
+status byte read from port $0E. It tests for values 1 through 9 with
+a DEC A cascade. Any value >= 10 falls through to RST 8 / $0C, which
+is Report D ("BREAK - CONT repeats"). Value $01 = OK (no error).
+
+So if the Z80 reads ANY byte that isn't 1-9 from port $0E when it
+expects a status response, you get the D error. This includes $00,
+$0A-$FF — essentially anything except a valid status code.
+
+PROTOCOL FLOW WHERE THE BUG OCCURS
+-----------------------------------
+The LOAD sequence goes:
+
+  Z80 -> Pico:  Pre-header (9 bytes + CRC): $42 $01 $FF ...
+  Pico -> Z80:  $40 (continue) then $01 (status OK)
+  Z80 -> Pico:  Data block: $44 + command string "TPI:filename.tap"
+  Pico -> Z80:  $40 (continue) then $01 (status OK)
+
+  --- Pico now switches shared lines from PIO to SPI ---
+  --- Pico reads file from SD card to internal flash ---
+  --- Z80 is in WF_NPH polling loop, reading port $0E repeatedly ---
+  --- Pico switches shared lines from SPI back to PIO ---
+
+  Pico -> Z80:  $40 (continue) then $01 (status OK)   <-- BUG IS HERE
+
+The Z80 WF_NPH loop at EXROM $1A54 does:
+  LD B,$E2          ; 226 iterations
+  CALL $0655        ; read port
+  BIT 6,A           ; check ONLY bit 6 (D6), ignores all other bits
+  JR NZ,success     ; bit 6 set = ready
+  DJNZ loop         ; keep polling
+
+CRITICAL HARDWARE DETAIL: There is a pullup resistor on D6 of the
+Z80 bus. When the data lines are tri-stated (floating) during the
+SPI-to-PIO switchover, D6 gets pulled high. The BIT 6,A test sees
+this as the "continue" signal and the Z80 immediately exits the
+polling loop. It then reads port $0E again for the status byte —
+but the Pico isn't driving the bus yet, so the Z80 reads garbage
+(with D6 high from the pullup, likely $40+ = well above the
+threshold of 10 that triggers Report D).
+
+The D6 pullup is the smoking gun: it makes a floating bus look like
+a valid "continue" signal, causing the Z80 to prematurely proceed
+to the status read before the Pico is ready.
+
+WHAT TO LOOK FOR IN THE PICO FIRMWARE
+--------------------------------------
+1. Find the code that switches from SPI mode back to PIO mode after
+   an SD card read. This is the critical transition.
+
+2. Check the GPIO pin state during switchover. The problem is that
+   when pins go through tri-state between SPI release and PIO claim,
+   the D6 pullup on the Z80 bus pulls that line high, which the Z80
+   interprets as "continue." The Z80 then immediately reads the next
+   byte as a status code — but the Pico isn't driving valid data yet.
+
+3. Check whether the PIO state machine's output register has a known
+   value loaded BEFORE the shared lines are reconnected to the Z80.
+   If the PIO comes up with stale data from before the SPI switch
+   (or uninitialized), that's the spurious byte the Z80 reads as
+   the status code.
+
+THE RACE CONDITION
+------------------
+The D6 pullup means there is effectively ZERO grace period. The
+moment the SPI releases the data lines, D6 floats high, and the
+Z80 sees "continue." The very next IN instruction reads the status
+byte. The Pico must be driving valid data ($01) on those lines
+before or at the same instant the lines are released from SPI.
+
+SUGGESTED FIX APPROACH
+----------------------
+Option A — Pre-load PIO before GPIO mux switch:
+
+  1. While SPI still owns the pins, configure the PIO state machine
+     and pre-load the TX FIFO with the intended response value(s)
+  2. Switch the GPIO mux from SPI function to PIO function
+  3. The PIO immediately drives valid data — no float window
+
+Option B — Hold D6 low during transition:
+
+  1. After SPI completes, before switching to PIO, configure D6 as
+     a regular GPIO output driven LOW (overriding the pullup)
+  2. Set up PIO with correct response loaded
+  3. Switch to PIO mode (which takes over D6 with valid data)
+  4. This prevents the Z80 from seeing a premature "continue"
+
+Option C — Quick hardware fix (ask Jeff/Ricardo):
+
+  Add a pullup on D0 as well. When the bus floats, the Z80 would
+  read $41 (D6 + D0) = "continue" flag with status $01 (OK).
+  The float state becomes a valid response instead of an error.
+  This is a band-aid but would eliminate the symptom immediately.
+
+KEY DETAIL: ONLY ONE PORT
+-------------------------
+Despite the protocol docs describing two ports ($0E data, $0F status),
+only port $0E is actually implemented. Both data and status/continue
+signaling happen through the same port. This means the continue flag
+(bit 6) and the status value ($01) are read from the same address,
+which makes the timing of what's on the bus even more critical.

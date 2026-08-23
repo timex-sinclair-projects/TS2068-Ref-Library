@@ -1,0 +1,122 @@
+FDD Command Bridge for TS-PICO — Design & Implementation
+==========================================================
+
+GOAL
+----
+Add CAT, FORMAT, MOVE, ERASE, and CLOSE as native BASIC keywords
+that route to existing TPI commands on the TS-PICO. Instead of
+typing SAVE "TPI:DIR *.*" you just type CAT.
+
+Phase 1: Simple shortcuts (CAT, ERASE, MOVE, FORMAT, CLOSE)
+Phase 2: Full OPEN#/CLOSE# with stream/channel I/O
+
+WHAT WE HAVE
+-------------
+- Modified EXROM (gus-exrom.rom) extended from 8K to 16K
+- 7,506 bytes of free space from $22AE to $3FFF
+- Existing TPI protocol fully implemented
+- Existing TPI BASIC commands: DIR, DELETE, CD, CLOSE, FRESET, etc.
+- All SAVE/LOAD/VERIFY/MERGE already work via TPI in SDCARD mode
+
+WHAT WE NEED
+-------------
+- Hook the RST 8 error handler to intercept FDD keyword tokens
+- Parse arguments for each command
+- Build equivalent TPI command strings
+- Send them through the existing TPI protocol
+
+HOW THE HOOK WORKS
+-------------------
+The TS-2068 BASIC interpreter already has these keywords in its token
+table (they're on the keyboard in extended mode):
+
+  Token  Keyword    Key
+  -----  -------    ---
+  $CF    CAT        0
+  $D0    FORMAT     Q (actually, see note)
+  $D1    MOVE       W
+  $D2    ERASE      E
+  $D3    OPEN #     R (Phase 2)
+  $D4    CLOSE #    T (Phase 2)
+
+When the user types CAT and presses ENTER, the interpreter tokenizes
+it to $CF and tries to execute it. With no disk system, the EXROM's
+SLVM routine doesn't recognize it and falls through to RST 8 error
+"Nonsense in BASIC."
+
+Both the Sinclair Interface 1 and the FDD 3000 used the same trick:
+hook the RST 8 error path. When RST 8 fires, check if the token at
+CH_ADD is one of our disk commands. If yes, redirect to our handler.
+If no, let the error proceed normally.
+
+The Gus EXROM's RST 8 handler is at $0008:
+  $0008: LD HL,($5C5D)    ; CH_ADD
+  $000B: LD ($5C5F),HL    ; X_PTR (error pointer)
+  $000E: POP HL
+  $000F: LD L,(HL)        ; get error code byte
+  $0010: LD (IY+0),L      ; store in ERR_NR
+  $0013: LD SP,($5C3D)    ; ERRSP
+  $0017: LD HL,$1354
+  ...continues to error handling...
+
+We can insert a check early in this path. At $0010 or just after
+loading the error code, we test: is this error $0B (Nonsense in
+BASIC)? If so, check CH_ADD for our keyword tokens. If matched,
+redirect to our handler. If not, continue with normal error.
+
+ALTERNATIVE: Since we control the EXROM, we could instead patch the
+SLVM entry point ($01AB) or the command dispatch to check for our
+tokens BEFORE they reach the error path. This is cleaner — no error
+is ever generated.
+
+RECOMMENDED APPROACH: Extend the existing command dispatch. The HOME
+ROM's DOSAVE at $2547 already redirects to the EXROM. We add a
+pre-check before SLVM: if the current token is CAT/FORMAT/MOVE/ERASE,
+jump to our handlers in the free space at $22AE+. Otherwise fall
+through to SLVM as normal.
+
+COMMAND MAPPING
+---------------
+  BASIC Command        TPI Equivalent             Notes
+  -------------        ---------------            -----
+  CAT                  SAVE "TPI:DIR *.*"         List all files
+  CAT "*.tap"          SAVE "TPI:DIR *.TAP"       Filtered listing
+  ERASE "filename"     SAVE "TPI:filename" then   Two-step: select
+                       SAVE "TPI:DELETE"           then delete
+  MOVE "path"          SAVE "TPI:CD path"          Change directory
+  MOVE "src" TO "dst"  (future: rename)            Phase 2
+  FORMAT               SAVE "TPI:FRESET"           Reset config
+  CLOSE                SAVE "TPI:CLOSE"             Close TAP file
+
+MEMORY MAP (in free EXROM space $22AE-$3FFF)
+---------------------------------------------
+  $22AE-$22CF  Token check / dispatch table
+  $22D0-$2350  CAT handler
+  $2350-$23A0  ERASE handler
+  $23A0-$23E0  MOVE handler
+  $23E0-$2410  FORMAT handler
+  $2410-$2430  CLOSE handler
+  $2430-$2500  Shared: argument parsing, string building
+  $2500-$2550  Shared: TPI command sender (wraps existing protocol)
+  $2550-$2600  String constants
+  $2600+       Room for Phase 2 (OPEN/CLOSE with streams)
+
+This uses roughly 850 bytes, leaving ~6,600 bytes for Phase 2.
+
+ABOUT THE FULL INTERFACE 1 SYNTAX
+-----------------------------------
+For anyone who wants to implement the full Interface 1 / FDD 3000
+syntax later: the hook mechanism is exactly the same. The difference
+is only in the argument parsing complexity:
+
+  Simple:   CAT                    -> "TPI:DIR *.*"
+  Full:     CAT #4                 -> open stream 4, send DIR there
+  Full:     CAT 2                  -> CAT drive 2
+
+  Simple:   ERASE "file"           -> select + delete
+  Full:     ERASE "m";1;"file"     -> delete on microdrive 1
+
+The dispatch code is identical. Only the parsing routines change.
+So starting with the simple version doesn't create any technical
+debt — the full version just adds more parsing before calling the
+same TPI commands.
