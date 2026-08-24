@@ -99,14 +99,19 @@ $F6  W  AY data write / R = AY data read
 ## DECR Video Mode Bits (port $FF)
 
 ```
-$00  Standard (Spectrum-compatible)
-$01  Second display file enabled
-$02  Ultra-high-resolution color
-$04  64-column mode
+D2-D0 is a 3-bit video mode field, not three independent flags:
+
+$00  (000) Standard (Spectrum-compatible)
+$01  (001) Second display file enabled
+$02  (010) Ultra-high-resolution color
+$06  (110) 64-column mode        <-- $06, NOT $04
 $80  EXROM enabled (keep this set during normal operation)
 ```
 
-Combine by OR: e.g., $81 = EXROM + second display file.
+Combine the mode field with bit 7 by OR: e.g. $81 = EXROM + second display file,
+$86 = EXROM + 64-column. Verified against the Technical Manual §2.1.13.1
+(`technical-manual/02-hardware-guide.md`) and the Zebra OS-64 ROM, which does
+`LD C,$06 / ADD A,C / OUT ($FF),A`.
 
 ---
 

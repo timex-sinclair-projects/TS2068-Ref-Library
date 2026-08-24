@@ -1,10 +1,34 @@
 # 2068 EPROM Revision Analysis
 
-Comparison of **2068 EPROM Revision.BIN** against the original TS2068 EXROM (`tc2068-1.rom`).
+Comparison of the two EXROM images in this repository:
 
-This is a **community revision** (not by Timex) that modifies 95 bytes across the 8,192-byte EXROM. All changes target the dispatcher and bank-switching subsystem ($0A52+, $1000+), plus the dispatch/fix tables. Tape routines, BASIC parsing, OPEN-DFILE, and CLOSE-DFILE are untouched.
+| Role | File in this repo | md5 |
+|------|-------------------|-----|
+| Original | `2068 ROMS/TS2068_U20.BIN` (stock U20 chip) | `575d203c6e15e679fba0b73f854ec7a2` |
+| Revised | `2068 ROMS/2068Exrom.BIN` (from `2068ROMS.zip` as `2068MODU20.BIN`) | `e3863481d1273af637922415e96dbb0b` |
+
+> **Provenance note.** An earlier revision of this document named the files
+> `2068 EPROM Revision.BIN` and `tc2068-1.rom`, neither of which is in this
+> repository, and gave the diff as 95 bytes. Every one of the 39 individually
+> listed byte changes below has since been re-checked against the two files
+> named above and **all 39 match exactly**, so this analysis is of this pair.
+> The true diff is **99 bytes**; the old total omitted a four-byte change in
+> BANK_ENABLE (group 14, added below) and undercounted the two rewrite blocks.
+> Beware if you obtained `tc2068-1.rom` elsewhere — that filename normally
+> denotes the European **TC2068**, which is not guaranteed to carry the same
+> EXROM as a US TS2068.
+
+This is a **community revision** (not by Timex) that modifies 99 bytes across the 8,192-byte EXROM. All changes target the dispatcher and bank-switching subsystem ($0A52+, $1000+), plus the dispatch/fix tables. Everything below $0A52 — the RST vectors, tape I/O, and BASIC parsing — is byte-identical, as are OPEN-DFILE and CLOSE-DFILE.
 
 The Bus Expansion Unit (BEU) services were the most complex part of the EXROM and were never tested against real hardware since the BEU was never commercially produced. Most of these changes target that code.
+
+**To reproduce the diff:**
+
+```python
+A = open("2068 ROMS/TS2068_U20.BIN","rb").read()   # original
+B = open("2068 ROMS/2068Exrom.BIN","rb").read()    # revised
+print([(hex(i), A[i], B[i]) for i in range(8192) if A[i] != B[i]])
+```
 
 ---
 
@@ -18,7 +42,7 @@ These changes are confirmed correct by examining the surrounding code and compar
 |---------|----------|---------|
 | $110E | $20 (`JR NZ`) | $28 (`JR Z`) |
 
-The well-documented NMI branch inversion bug. The original jumps to the user handler when NMIADD is zero and returns when it's non-zero — exactly backwards. This is the EXROM's dispatcher-area copy of the NMI handler (the HOME ROM copy at $0066 is in a separate chip).
+The well-documented NMI branch inversion bug. With `JR NZ`, a zero NMIADD falls through to `JP (HL)` with HL = 0 — a jump to $0000, i.e. a reset — while a non-zero NMIADD returns without ever calling the user handler. Exactly backwards. See `ts2068_errata_and_notes.md`. This is the EXROM's dispatcher-area copy of the NMI handler (the HOME ROM copy at $0066 is in a separate chip).
 
 ### 2. Dispatch Table Off-by-One Fixes ($1FD8-$1FDC) — 3 entries
 
@@ -127,18 +151,71 @@ Changes the direction field test from a bit-7 sign check (`RLCA/RRCA/JR C`) to a
 
 ---
 
+### 14. BANK_ENABLE — EXT bank path replaced ($12D1-$12D4) — 4 bytes
+
+**Not present in earlier revisions of this document.** Found by diffing the two
+images directly; the surrounding code is `X_BANK_ENABLE`, branch `BE_NTDOCK`,
+in `disassemblies/ts2068_exrom_U20_stock.txt`.
+
+| Address | Original | Revised |
+|---------|----------|---------|
+| $12D1-$12D2 | `17` `CB 19` — `RLA` / `RR C` | `CB FF` — `SET 7,A` |
+| $12D3-$12D4 | `3F` — `CCF` (then `1F` `RRA` at $12D5) | `18 ED` — `JR $12C2` |
+
+Original (bank = $FE, i.e. the EXT/EXROM bank):
+
+```z80
+        IN   A,(HREXPT)      ; $12CF  read DECR
+        RLA                  ; rotate DECR bit 7 out into carry
+        RR   C               ; ...and into C bit 7
+        CCF                  ; complement it
+        RRA                  ; ...and back into A bit 7
+        OUT  (HREXPT),A      ; $12D6  write DECR back
+        BIT  7,A
+        JR   NZ,BE_SET
+        IN   A,(DKHSPT)      ; clear HSR bit 0
+        RES  0,A
+        OUT  (DKHSPT),A
+        JR   BE_EXIT
+BE_SET: IN   A,(DKHSPT)      ; or set HSR bit 0
+        SET  0,A
+        OUT  (DKHSPT),A
+        JR   BE_EXIT
+```
+
+Revised:
+
+```z80
+        IN   A,(HREXPT)      ; $12CF  read DECR
+        SET  7,A             ; $12D1  unconditionally enable EXROM
+        JR   $12C2           ; $12D3  -> OUT (HREXPT),A / LD A,C / CPL
+                             ;           / OUT (DKHSPT),A / JR BE_EXIT
+```
+
+The revision drops the bit-shuffling between DECR bit 7 and C bit 7 entirely: it
+just sets the EXROM-enable bit and falls into the shared `BE_EXT_OK` tail, which
+writes DECR and then programs the HSR straight from the chunk mask in C. That
+makes everything from $12D5 to the end of `BE_SET` dead code, which is why only
+four bytes needed to change.
+
+**Assessment:** the mechanism is clear from the bytes; whether it is *correct*
+depends on whether any caller relied on the original's manipulation of C bit 7,
+which cannot be settled without BEU hardware. Treat as **unverified**.
+
+---
+
 ## Uncertain / Complex Rewrites
 
 These are substantial logic changes to routines that can only be tested against BEU hardware.
 
-### 11. GET_STATUS Rewrite ($1230-$1249) — 26 bytes
+### 11. GET_STATUS Rewrite ($1230-$1249) — 23 bytes changed within a 26-byte span
 
 Major restructuring of the routine that reads the current bank configuration. Changes include:
 - Result register moved from B to C (to match the documented API: `STATUS: B, HORIZONTAL_SELECT: C`)
 - Different port-reading sequences for DOCK and EXT bank detection
 - Changed conditional branching throughout
 
-### 12. GET_NUMBER Rewrite ($1271-$1298) — 28 bytes
+### 12. GET_NUMBER Rewrite ($1271-$1298) — 33 bytes changed within a 40-byte span
 
 Restructured logic for determining which bank (HOME/DOCK/EXT) owns a given memory chunk. The revised code ends with 4 bytes of NOPs ($1295-$1298), suggesting the new logic is more compact. Includes changed port read ordering and mask operations.
 
@@ -168,7 +245,22 @@ The fix table contains addresses that need patching when the dispatcher relocate
 
 ## Byte-Level Diff
 
-95 bytes differ between the original and revised EXROM:
+**99 bytes** differ between the original and revised EXROM, in 22 clusters:
+
+```
+$0A52-$0A59  (5)   $0A88-$0A89  (2)   $0B1B  (1)   $0B49  (1)
+$110E        (1)   $1140        (1)   $1150-$1155  (6)
+$120B-$1212  (3)   $1230-$1249 (23)   $1271-$129A (34)
+$12D1-$12D4  (4)   $131B        (1)   $134A        (1)   $1370  (1)
+$1410        (1)   $14DF-$14E2  (2)   $14F3-$14F5  (3)   $156A  (1)
+$1D34-$1D3A  (3)   $1D68        (1)   $1FD8-$1FDC  (3)   $1FEE  (1)
+```
+
+Accounting: 39 individually listed bytes + 23 in the GET_STATUS rewrite
++ 33 in the GET_NUMBER rewrite + 4 in BANK_ENABLE = **99**. (The $1271-$129A
+cluster spans the GET_NUMBER rewrite plus the separately listed $129A.)
+
+Individual byte changes:
 
 ```
 Address  Orig  Rev   Context
@@ -193,8 +285,6 @@ $1155    $F1   $2B   GET_WORD: POP AF → DEC HL
 $120B    $2E   $24   GET_STATUS: branch target
 $120F    $1D   $37   GET_STATUS: branch target
 $1212    $1F   $27   GET_STATUS: branch target
-$1230-$1249          GET_STATUS: rewrite (26 bytes)
-$1271-$1298          GET_NUMBER: rewrite (28 bytes)
 $129A    $C5   $F3   BANK_ENABLE: PUSH BC → DI
 $131B    $C1   $FB   BANK_ENABLE: POP BC → EI
 $134A    $F5   $F3   SAVE_STATUS: PUSH AF → DI
@@ -214,4 +304,12 @@ $1FD8    $21   $22   Dispatch: XFER_BYTES $6721 → $6722
 $1FDA    $CF   $D0   Dispatch: CALL_BANK $65CF → $65D0
 $1FDC    $71   $72   Dispatch: GOTO_BANK $6571 → $6572
 $1FEE    $A3   $8E   Dispatch: CHG_V $0EA3 → $0E8E
+$12D1    $17   $CB   BANK_ENABLE: RLA → SET 7,A          (group 14)
+$12D2    $CB   $FF   BANK_ENABLE: (RR C) → (SET 7,A)     (group 14)
+$12D3    $19   $18   BANK_ENABLE: (RR C) → JR            (group 14)
+$12D4    $3F   $ED   BANK_ENABLE: CCF → (JR displacement)(group 14)
 ```
+
+The two rewrite blocks are not listed byte by byte:
+`$1230-$1249` (23 of those 26 addresses differ) and `$1271-$1298`
+(33 of those 40 differ).

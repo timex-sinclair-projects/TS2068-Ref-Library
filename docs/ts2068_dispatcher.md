@@ -20,22 +20,35 @@ machine stack from chunk 3 to chunk 7; failing to check causes a crash.
 
 ## Calling Convention
 
-**Without jump flag (CALL — returns to caller):**
+**Reach the dispatcher with `CALL`, and pass the service code on the stack.**
+It is not passed in `A`.
 
-Push in this order (last item pushed = top of stack at CALL):
-```
-1. Parameter data for the service (if any)
-2. PRM_OUT  — 16-bit: bytes of data you are passing on the stack (pushes × 2)
-3. PRM_IN   — 16-bit: bytes of data the service will return on the stack (pushes × 2)
-4. SVC_CODE — 16-bit: bits 0-14 = service number; bit 15 = 0 (CALL mode)
+The dispatcher source (EXROM $1000, copied to $6000) begins:
+
+```z80
+        LD   IX,0
+        ADD  IX,SP        ; IX = SP on entry
+        ...
+        LD   E,(IX+2)
+        LD   D,(IX+3)     ; DE = SVC_CODE
 ```
 
-**With jump flag (JP — no return):**
+and the CALL path later reads `(IX+4)/(IX+5)` as PRM_IN and `(IX+6)/(IX+7)` as
+PRM_OUT, treating `(IX+0)/(IX+1)` as the return address. That fixes the layout:
 
-Push only SVC_CODE with bit 15 SET:
 ```
-1. SVC_CODE | $8000  — service number with jump flag set
+   (IX+0)  return address     <- pushed by your CALL
+   (IX+2)  SVC_CODE           <- pushed last
+   (IX+4)  PRM_IN
+   (IX+6)  PRM_OUT
+   (IX+8)  parameter data for the service, if any  <- pushed first
 ```
+
+Push in this order: parameter data, PRM_OUT, PRM_IN, SVC_CODE — then CALL.
+
+SVC_CODE is 16-bit: bits 0-14 = service number, bit 15 = jump flag (set = the
+dispatcher does a GOTO_BANK instead of a CALL_BANK, so the service does not
+return to you).
 
 **Standard call template (no stack parameters):**
 ```asm
@@ -46,9 +59,15 @@ Push only SVC_CODE with bit 15 SET:
     PUSH DE              ; SVC_CODE
     LD   A, (VIDMOD)
     OR   A
-    JP   Z,  $6200       ; normal video
-    JP   $F9C0           ; extended video
+    CALL Z,  $6200       ; normal video
+    ...                  ; and CALL $F9C0 when VIDMOD <> 0
 ```
+
+> An earlier revision of this file gave the template as `JP $6200`. That cannot
+> work: with a JP there is no return address on the stack, so `(IX+2)` would
+> hold PRM_IN rather than SVC_CODE. The naming of PRM_IN vs PRM_OUT — which
+> direction each counts — has **not** been independently verified against the
+> CALL_BANK code; treat the two counts with care until it is.
 
 ---
 

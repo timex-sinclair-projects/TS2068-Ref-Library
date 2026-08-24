@@ -10,13 +10,24 @@ Register (DECR, port $FF).
 
 ### Mode Summary
 
-| DECR bits | Mode | Description |
-|-----------|------|-------------|
-| $00       | Standard | 256×192 pixels, 32×24 color cells (Spectrum compatible) |
-| $01       | Dual-file | Two display files; allows page-flipping or overlay effects |
-| $02       | Hi-color  | 256×192, one attribute byte per pixel pair (ultra-high-resolution color) |
-| $04       | 64-column | 64×24 text, 2 pixels per character width |
-| $01+$02   | Dual + hi-color | Combined |
+DECR bits **D2-D0 are a 3-bit mode field, not three independent flags** — see the
+table on page 35 of the Technical Manual (`technical-manual/02-hardware-guide.md`).
+
+| D2-D0 | Mode | Description |
+|-------|------|-------------|
+| `000` ($00) | Standard | 256×192 pixels, 32×24 color cells (Spectrum compatible) |
+| `001` ($01) | Dual-file | Two display files; allows page-flipping or overlay effects |
+| `010` ($02) | Hi-color | 256×192, one attribute byte per pixel pair (ultra-high-resolution color) |
+| `110` ($06) | 64-column | 64×24 text, 4 pixels per character width |
+
+The manual notes that other combinations "may produce unpredictable results".
+
+> **Corrected.** An earlier revision of this file listed 64-column mode as `$04`
+> and described it as "DECR bit 2", and gave 2 pixels per character. Both were
+> wrong: 64 columns across 256 pixels is 4 pixels per character, and the mode
+> value is `110` = `$06`. The Zebra OS-64 ROM — a shipping 64-column OS —
+> confirms it, doing `LD C,$06 / ADD A,C / OUT ($FF),A` and calling `$06` the
+> "64-col mode enable bits" (see `zebra_os64_analysis.md`).
 
 **Bit 7 of DECR must be preserved** — it controls EXROM selection. Always keep a RAM
 copy of the current DECR value and OR your mode bits into it.
@@ -28,7 +39,7 @@ copy of the current DECR value and OR your mode bits into it.
 - Display file at $4000–$57FF (pixels) and $5800–$5AFF (attributes)
 - Standard ZX Spectrum layout; most Spectrum software uses this
 
-### Second Display File Mode (DECR bit 0 = 1)
+### Second Display File Mode (DECR D2-D0 = `001`, i.e. `$01`)
 
 Opening the second display file via OPEN-DFILE ($08 dispatcher / CHNG_VID):
 
@@ -45,14 +56,14 @@ Opening the second display file via OPEN-DFILE ($08 dispatcher / CHNG_VID):
 **Closing:** CLOSE-DFILE moves everything back. Note: the disassembly indicates
 the CLOSE-DFILE routine has a bug and does not work properly.
 
-### 64-Column Mode (DECR bit 2 = 1)
+### 64-Column Mode (DECR D2-D0 = `110`, i.e. `$06`)
 
 - 64 characters per row × 24 rows
 - Each character is 4 pixels wide × 8 pixels tall
 - Paper color for the entire display set by DECR bits 5-3
 - Ink color determined by individual pixel pairs within cells
 
-### Ultra-High-Resolution Color (DECR bit 1 = 1)
+### Ultra-High-Resolution Color (DECR D2-D0 = `010`, i.e. `$02`)
 
 - One attribute byte per pixel pair (every 2 horizontal pixels gets its own color)
 - Same pixel resolution as standard mode

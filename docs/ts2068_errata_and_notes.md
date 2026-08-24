@@ -10,13 +10,40 @@ is uncertain — particularly around Timex-specific features.
 
 ### NMI Handler Direction Inverted ($0066)
 
-**Location:** HOME ROM $0066 (NMI routine)
-**Bug:** The branch condition is `JR NZ, NO-RESET` but should be `JR Z, NO-RESET`.
-**Effect:** The NMI triggers a reset when NMIADD is non-zero, and does NOT reset
-when NMIADD is zero — the opposite of documented behavior.
-**Workaround:** Set NMIADD to your desired handler address and accept that the
-branch logic is inverted. There is no software workaround that preserves the
-documented interface.
+**Location:** HOME ROM $0066, branch byte at $006D. The EXROM carries its own
+copy of the same routine, with the same bug, at $110E.
+
+**The code as shipped:**
+
+```z80
+        PUSH AF
+        PUSH HL
+        LD   HL,(USRNMI)
+        LD   A,H
+        OR   L
+        JR   NZ,$0070     ; <-- should be JR Z
+        JP   (HL)
+$0070:  POP  HL
+        POP  AF
+        RETN
+```
+
+**Bug:** the branch condition is `JR NZ` where it should be `JR Z`.
+
+**Effect:** with `JR NZ`, a **zero** NMIADD falls through to `JP (HL)` with
+HL = 0 — a jump to $0000, i.e. a reset. A **non-zero** NMIADD branches straight
+to the exit and returns without ever calling the user handler. The user routine
+is therefore never reached, and it is the *empty* vector that resets the machine.
+
+(Earlier revisions of this file, and of CLAUDE.md, described this the other way
+round. The listing above is from `disassemblies/ts2068_home_rom_U16_stock.txt`
+and is
+the authority.)
+
+**Workaround:** none that preserves the documented interface on a stock ROM —
+leave NMIADD non-zero if you want the NMI to be harmless. Patching $006D from
+$20 to $28 fixes it; both `2068 ROMS/2068Home.BIN` and the Zebra OS-64 cartridge
+ROM ship with that patch applied.
 
 ### CLOSE-DFILE Does Not Work (EXROM $0E27)
 
@@ -120,9 +147,12 @@ The TS 2068 is largely **incompatible** with ZX Spectrum software because:
 
 1. **ROM routines at different addresses** — most Spectrum ROM subroutines have
    moved. Code that calls Spectrum ROM addresses directly will jump to wrong locations.
-2. **BASIC token numbering differences** — the TS 2068 has additional tokens
-   (DELETE, ON ERR, STICK, SOUND, FREE, RESET) which shift token numbers for
-   some commands compared to later Spectrum models.
+2. **ROM subroutine addresses** (the main problem) — see point 1. Note that
+   BASIC **token numbering is NOT a source of incompatibility**: tokens
+   $A5–$FF are identical to the Spectrum's, and nothing is shifted. The 2068's
+   six extra keywords (DELETE, ON ERR, STICK, SOUND, FREE, RESET) had no free
+   slots in $A5–$FF, so they overload the low codes $0C and $7B–$7F instead.
+   See `ts2068_tokens_and_keyboard.md`.
 3. **Different ULA** — the SCLD behaves differently from the Spectrum ULA for
    some timing-sensitive operations.
 4. **Port $FE timing** — some Spectrum software relies on exact timing of port $FE
@@ -133,7 +163,7 @@ The TS 2068 is largely **incompatible** with ZX Spectrum software because:
 - **BASIC syntax and floating point** — standard Sinclair BASIC syntax is the same
 - **System variable layout** — $5C00–$5CB5 is identical to the Spectrum
 - **Display file format** — standard mode ($4000–$5AFF) is identical
-- **Character set** — identical to Spectrum ($3D00 location differs but same data)
+- **Character set** — identical to the Spectrum, and at the same address ($3D00)
 - **Calculator opcodes** — floating point calculator is compatible
 
 ### Spectrum Code That May Work

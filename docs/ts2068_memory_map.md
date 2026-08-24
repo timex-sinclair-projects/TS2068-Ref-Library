@@ -29,8 +29,7 @@ Horizontal Select Register ($F4) and Display Enhancement Control Register ($FF).
 |-------------|---------|
 | $0000–$007B | Restart routines (RST 0, 8, 10, 18, 20, 28, 30, 38) |
 | $007C–$0097 | Error-2, NMI handler, CH_ADD+1, SKIP-OVER |
-| $0098–$0102 | BASIC token table — function tokens $86–$C3 |
-| $0103–$0226 | BASIC token table — command tokens $C4–$FF |
+| $0098–$0226 | BASIC keyword table (`TOKENS`) — token value = $A4 + table index, so it covers $A5 RND … $FF COPY, then the six 2068-only keywords (DELETE, ON ERR, STICK, SOUND, FREE, RESET) in keyword-table-2 order. Token values are identical to the ZX Spectrum's; see `ts2068_tokens_and_keyboard.md` |
 | $0227–$024D | Main keys table (LCKEYS) |
 | $024E–$0267 | Unshifted extended mode keys (EKEYS) |
 | $0268–$0281 | Shifted extended mode keys (SEKEYS) |
@@ -173,14 +172,16 @@ After OPEN-DFILE:
 
 ### DECR — Display Enhancement Control Register (port $FF, write only)
 
-| Bit | Function |
-|-----|----------|
-|  0  | 1 = enable second display file |
-|  1  | 1 = ultra-high-resolution color (expanded attributes) |
-|  2  | 1 = 64-column mode |
-| 3-5 | Paper color for 64-column mode |
-|  6  | 1 = disable keyboard interrupt |
-|  7  | 1 = enable EXROM in EXROM bank |
+| Bits | Function |
+|------|----------|
+| D2-D0 | **Video mode field** (not independent flags): `000` normal · `001` second display file · `010` ultra-high-resolution colour · `110` 64-column. Other combinations are undefined. |
+| D5-D3 | Ink/paper colour for 64-column mode: `000` black/white · `001` blue/yellow · `010` red/cyan · `011` magenta/green · `100` green/magenta · `101` cyan/red · `110` yellow/blue · `111` white/black |
+| D6 | Inhibit the 17 ms interrupt — **0 enables** it |
+| D7 | Enable EXROM in the EXROM bank |
+
+> **Corrected.** An earlier revision listed D0/D1/D2 as separate flags and gave
+> 64-column mode as bit 2 (`$04`). D2-D0 is one 3-bit field and 64-column is
+> `110` = `$06`, per the Technical Manual §2.1.13.1 and the Zebra OS-64 ROM.
 
 Bit 7 must be preserved. The OS keeps a copy in RAM; do the same in your code.
 

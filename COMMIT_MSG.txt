@@ -1,0 +1,45 @@
+Audit and correct the reference set; add toolkit disassembly and manual chapters
+
+Accuracy fixes, all verified against the ROM images in 2068 ROMS/:
+
+* NMI handler: the effect was documented backwards in CLAUDE.md and
+  ts2068_errata_and_notes.md. With `JR NZ` at $006D a *zero* NMIADD falls
+  through to `JP (HL)` and resets the machine, while a non-zero one returns
+  without calling the user handler.
+* Dispatcher: the service code is a 16-bit word pushed on the stack and the
+  dispatcher must be reached with CALL, not JP with the code in A. Stack
+  layout taken from the dispatcher source at EXROM $1000.
+* BASIC tokens: $A5-$FF are identical to the ZX Spectrum's; nothing is
+  shifted. The six 2068-only keywords overload $0C and $7B-$7F. Verified by
+  walking the ROM keyword table ($A4 + index).
+* 64-column video mode is DECR $06 (D2-D0 = 110), not $04. D2-D0 is a 3-bit
+  field, not three flags. Confirmed by the Technical Manual and by Zebra
+  OS-64, which does `LD C,$06 / ADD A,C / OUT ($FF),A`.
+* The ROM listings are z88dk-z80asm syntax, not TASM, and both are
+  HTML-escaped.
+
+CLAUDE.md now leads with which ROM image is which. 2068 ROMS/ holds two
+different HOME ROMs and two different EXROMs; the disassemblies match the
+stock pair (TS2068_U16/U20), and the filenames now say so.
+
+Deduplicated the three files that existed in both docs/ and disassemblies/,
+keeping single copies in disassemblies/ alongside the 2068_DEFS.ASM they
+INCLUDE.
+
+exrom_revision_analysis.md re-checked against the actual images: all 39 listed
+byte changes match, the true diff is 99 bytes rather than 95, and a previously
+undocumented 4-byte BANK_ENABLE rewrite at $12D1-$12D4 is now described.
+
+New: disassemblies/ts2068_toolkit_E930_annotated.asm, a fully annotated
+disassembly of TS 2068 TOOLKIT (Bob Mitchell, 1985). Its code/data split had to
+be rebuilt from scratch because roughly half the image is inline script data
+following CALL instructions.
+
+New: docs/technical-manual/, the narrative half of the Technical Reference
+Manual (pages 1-104) as markdown chapters with rendered figures. Sections 7-9
+are deliberately excluded as duplicates of the disassemblies. The manual's own
+defects - transposed text, two placeholder figures, an "under construction"
+schematic - are catalogued in its README.
+
+.gitignore: ignore .DS_Store and .claude/settings.local.json; the two tracked
+.DS_Store files are removed from the index but left on disk.
