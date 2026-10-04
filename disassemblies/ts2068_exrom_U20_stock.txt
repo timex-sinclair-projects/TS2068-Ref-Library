@@ -2711,7 +2711,7 @@ CHG_V:
         LD HL,$12C0                     ;number of bytes needed for RAM services
         LD B,H                          ;save for REMGSZ later on, if needed
         LD C,L
-        LD DE,$0840                     ;$2B00 total bytes needed
+        LD DE,$0840                     ;$2B00 total bytes needed [corrected: $12C0 + $0840 = $1B00]
         ADD HL,DE
         LD DE,(STKEND)                  ;add to free RAM space stored in
         ADD HL,DE                       ;STKEND
@@ -3084,8 +3084,8 @@ PHLAF:                                  ;JUMP HERE TO POP HL, POP AF, ENABLE INT
         RET
 
 ;HERE TO SERVICE THE NON-MASKABLE INTERRUPT
-;IF (NMIADD)=0 THEN RETURNS STRAIGHT AWAY;
-;ELSE, JUMPS TO (NMIADD) WHIT HL (ON TOP) , AF &amp;amp;amp; RETN ADDR ON
+;IF (NMIADD)=0 THEN RETURNS STRAIGHT AWAY; [corrected: reversed — as coded (JR NZ) a zero NMIADD falls through to JP (HL) = JP $0000, a reset]
+;ELSE, JUMPS TO (NMIADD) WHIT HL (ON TOP) , AF &amp;amp;amp; RETN ADDR ON [corrected: a non-zero NMIADD returns via RETN and is never jumped to]
 ;THE STACK
 
 NMI:    PUSH AF
@@ -3170,7 +3170,7 @@ WRITE_BS_REG: PUSH AF                   ;SAVE REGS
         PUSH HL
         LD H,D
         LD L,0                          ;HL = MEMORY MAPPED ADR
-        LD A,(LOWNYB)                   ;SAVE ($E000)
+        LD A,(LOWNYB)                   ;SAVE ($E000) [corrected: LOWNYB = $C000; bytes 3A 00 C0]
         PUSH AF
         LD A,(HL)                       ;SAVE (HL)
         PUSH AF
@@ -3210,7 +3210,7 @@ WRITE_BS_REG: PUSH AF                   ;SAVE REGS
         POP AF
         LD (HL),A                       ;RESTORE (HL)
         POP AF
-        LD (LOWNYB),A                   ;RESTORE ($E000)
+        LD (LOWNYB),A                   ;RESTORE ($E000) [corrected: LOWNYB = $C000]
         POP HL                          ;RESTORE REGS
         POP BC
         POP AF
@@ -3224,7 +3224,7 @@ READ_BS_REG: PUSH AF                    ;SAVE REGS
         PUSH HL
         LD H,D
         LD L,0                          ;HL=MEMORY MAPPED ADDR
-        LD A,(LOWNYB)                   ;SAVE ($E000)
+        LD A,(LOWNYB)                   ;SAVE ($E000) [corrected: LOWNYB = $C000; bytes 3A 00 C0]
         PUSH AF
         LD A,(HL)                       ;SAVE (HL)
         PUSH AF
@@ -3270,7 +3270,7 @@ READ_BS_REG: PUSH AF                    ;SAVE REGS
         POP AF
         LD (HL),A                       ;RESTORE (HL)
         POP AF
-        LD (LOWNYB),A                   ;RESTORE ($E000)
+        LD (LOWNYB),A                   ;RESTORE ($E000) [corrected: LOWNYB = $C000]
         POP HL                          ;RESTORE REGS
         POP BC
         POP AF
@@ -4187,10 +4187,10 @@ FIXTBL: DEFW DISPATCH+$32
         DEFW $5200+GET_NUMBER+$0F
 
         DEFW BANK_ENABLE+$06
-        DEFW BANK_ENABLE+$13
+        DEFW BANK_ENABLE+$13                  ;[corrected: = $64AC, which is the operand of LD D,$A0 + the PUSH AF opcode, not an address; should be +$10 ($64A9, operand of CALL $635C at ROM $12A8). Stock-ROM bug, fixed in 2068Exrom.BIN]
         DEFW BANK_ENABLE+$1A
-        DEFW BANK_ENABLE+$75
-        DEFW BANK_ENABLE+$7D
+        DEFW BANK_ENABLE+$75                  ;[corrected: = $650E, the CALL opcode at ROM $130E; should be +$76 ($650F). Stock-ROM bug]
+        DEFW BANK_ENABLE+$7D                  ;[corrected: = $6516, the CALL opcode at ROM $1316; should be +$7E ($6517). Stock-ROM bug]
 
         DEFW $5200+SAVE_STATUS+$14
         DEFW $5200+SAVE_STATUS+$1C
@@ -4221,7 +4221,7 @@ FIXTBL: DEFW DISPATCH+$32
         DEFW $5200+CREATE_BITMAP+$1B
 
         DEFW $5200+XFER_BYTES+$0E
-        DEFW $5200+XFER_BYTES+$2D
+        DEFW $5200+XFER_BYTES+$2D      ;[corrected: = $674F, the CALL opcode at ROM $154F (whose operand $6750 is the next entry); the CALL $651E operand at $6744 (ROM $1543) is missing. Stock-ROM bug]
         DEFW $5200+XFER_BYTES+$2E
         DEFW $5200+XFER_BYTES+$38
         DEFW $5200+XFER_BYTES+$54
@@ -4414,8 +4414,8 @@ FIXTBL: DEFW DISPATCH+$32
         DEFW $FFFF                      ;                       RESERVED21:
         DEFW $FFFF                      ;                       RESERVED20:
         DEFW $6721                      ;XFER_BYTES?($6722)     RESERVED19:
-        DEFW $65CF                      ;CALL_BANK? ($65CF)     RESERVED18:
-        DEFW $6571                      ;GOTO_BANK? ($6571)     RESERVED17:
+        DEFW $65CF                      ;CALL_BANK? ($65CF)     RESERVED18: [corrected: CALL_BANK is $65D0; $65CF is the high byte of BS_SP]
+        DEFW $6571                      ;GOTO_BANK? ($6571)     RESERVED17: [corrected: GOTO_BANK is $6572; $6571 is the RET of RESTORE_STATUS]
         DEFW $6499                      ;BANK_ENABLE            RESERVED16:
         DEFW $645E                      ;GET_NUMBER             GET_NUMBER:
         DEFW $6405                      ;GET_STATUS             GET_STATUS:

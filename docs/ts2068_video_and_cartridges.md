@@ -17,20 +17,25 @@ table on page 35 of the Technical Manual (`technical-manual/02-hardware-guide.md
 |-------|------|-------------|
 | `000` ($00) | Standard | 256×192 pixels, 32×24 color cells (Spectrum compatible) |
 | `001` ($01) | Dual-file | Two display files; allows page-flipping or overlay effects |
-| `010` ($02) | Hi-color | 256×192, one attribute byte per pixel pair (ultra-high-resolution color) |
-| `110` ($06) | 64-column | 64×24 text, 4 pixels per character width |
+| `010` ($02) | Hi-color | 256×192, one attribute byte per 8×1 pixel strip (ultra-high-resolution color) |
+| `110` ($06) | 64-column | 64×24 text on a 512-dot line; each character is 8 half-width dots |
 
 The manual notes that other combinations "may produce unpredictable results".
 
 > **Corrected.** An earlier revision of this file listed 64-column mode as `$04`
-> and described it as "DECR bit 2", and gave 2 pixels per character. Both were
-> wrong: 64 columns across 256 pixels is 4 pixels per character, and the mode
-> value is `110` = `$06`. The Zebra OS-64 ROM — a shipping 64-column OS —
-> confirms it, doing `LD C,$06 / ADD A,C / OUT ($FF),A` and calling `$06` the
-> "64-col mode enable bits" (see `zebra_os64_analysis.md`).
+> and described it as "DECR bit 2", and gave 2 pixels per character; a later one
+> said "4 pixels per character". The mode value is `110` = `$06` — the Zebra
+> OS-64 ROM, a shipping 64-column OS, does `LD C,$06 / ADD A,C / OUT ($FF),A`
+> and calls `$06` the "64-col mode enable bits" (see `zebra_os64_analysis.md`).
+> Each character is a whole display-file byte (8 dots) taken alternately from
+> the two display files (Technical Manual §5.2.3), so "4 pixels" is true only as
+> a width: 4 standard pixels' width, 8 dots.
 
-**Bit 7 of DECR must be preserved** — it controls EXROM selection. Always keep a RAM
-copy of the current DECR value and OR your mode bits into it.
+**Bit 7 of DECR must be preserved** — it selects EXROM (1) or DOCK (0) for the
+chunks the HSR switches. The stock ROMs keep no RAM copy; they read the port
+back and OR the mode in: `IN A,($FF) / AND $80 / OR mode / OUT ($FF),A`
+(EXROM OPEN-DFILE $0E1B, CHNG_VID $0EF4). The Technical Manual port table lists
+$FF as R/W.
 
 ### Standard Mode ($00)
 
@@ -41,33 +46,46 @@ copy of the current DECR value and OR your mode bits into it.
 
 ### Second Display File Mode (DECR D2-D0 = `001`, i.e. `$01`)
 
-Opening the second display file via OPEN-DFILE ($08 dispatcher / CHNG_VID):
+Opening the second display file via CHNG_VID (EXROM $0E8E), which calls OPEN-DFILE.
+(Dispatcher service $08 is meant to reach CHNG_VID, but in the stock EXROM its
+jump-table word is $0EA3, mid-instruction — see `ts2068_dispatcher.md`; call
+$0E8E with the EXROM paged in, as `ts2068_extended_color_mode.md` does.)
 
-1. UDG is moved to high RAM
-2. Dispatcher code and machine stack relocated from $6000 to $F7C0
-3. Second display file occupies $6000–$7BFF (pixels + attributes)
-4. VIDMOD ($5CC2) is set to the requested mode (non-zero)
+1. CHNG_VID opens $12C0 bytes at $6840, moving CHANS to $7B00 and PROG to $7B16
+2. UDG is moved **down** by $0840 bytes ($FF58 → $F718 with the power-on layout)
+3. The $6000–$683F block (machine stack $6000–$61FF + dispatcher code
+   $6200–$682F) is copied to $F7C0–$FFFF (+$97C0)
+4. Second display file occupies $6000–$7AFF (pixels $6000–$77FF, attributes
+   $7800–$7AFF) and is cleared
+5. VIDMOD ($5CC2) is set to the requested mode (non-zero)
 
 **After opening second display file:**
-- VIDMOD ≠ 0 → use dispatcher at $F9C0 (not $6200)
-- Machine stack base moves to ~$F9C0
+- VIDMOD ≠ 0 → use dispatcher at $F9C0 (not $6200); code is $F9C0–$FFEF
+- Machine stack is $F7C0–$F9BF; MSTBOT = $F9C0 (CHNG_VID adds $97C0)
 - UDG at new address (read from UDG system variable at $5C7B)
+- RAMTOP is not changed
 
-**Closing:** CLOSE-DFILE moves everything back. Note: the disassembly indicates
-the CLOSE-DFILE routine has a bug and does not work properly.
+**Closing:** CLOSE-DFILE moves everything back. It is often reported not to work
+properly; that report is **(unverified)** — the stock code mirrors OPEN-DFILE and
+no failure mechanism has been found (see `ts2068_errata_and_notes.md`).
 
 ### 64-Column Mode (DECR D2-D0 = `110`, i.e. `$06`)
 
 - 64 characters per row × 24 rows
-- Each character is 4 pixels wide × 8 pixels tall
-- Paper color for the entire display set by DECR bits 5-3
-- Ink color determined by individual pixel pairs within cells
+- Each character is one display-file byte — 8 dots × 8 lines — from the primary
+  file for even columns and the second file for odd columns, so a line is 512
+  dots, each half the width of a standard pixel (Technical Manual §5.2.3)
+- DECR bits 5-3 select one ink colour, with its complementary paper, for the
+  whole screen; BRIGHT and FLASH are fixed at 0 and the border follows the paper
+- The attribute areas ($5800–$5AFF, $7800–$7AFF) are not read
 
 ### Ultra-High-Resolution Color (DECR D2-D0 = `010`, i.e. `$02`)
 
-- One attribute byte per pixel pair (every 2 horizontal pixels gets its own color)
+- One attribute byte per 8×1 pixel strip — 6144 attribute bytes
 - Same pixel resolution as standard mode
-- Attribute file layout differs from standard
+- Attributes live in the second display file at $6000–$77FF, with exactly the
+  pixel file's layout: attribute address = pixel address + $2000. See
+  `ts2068_extended_color_mode.md`
 
 ---
 
@@ -81,7 +99,8 @@ the CLOSE-DFILE routine has a bug and does not work properly.
 5. Update UDG pointer
 6. Disable interrupts (DI)
 7. Adjust SP by +$97C0 (move stack to high memory)
-8. Move dispatcher code + stack from $6000 to $F7C0 (BC=$0840 bytes)
+8. Move the $6000–$683F block (machine stack $6000–$61FF + dispatcher code $6200–$682F)
+   to $F7C0–$FFFF (BC=$0840 bytes); the dispatcher entry goes $6200 → $F9C0
 9. Walk fix table at $1D00 to update all internal addresses in moved code
 10. Store video mode in VIDMOD
 11. Enable interrupts (EI)
@@ -90,9 +109,14 @@ the CLOSE-DFILE routine has a bug and does not work properly.
 14. Restore registers, RET
 ```
 
-The fix table at EXROM $1D00 contains address pairs: (offset-into-moved-code, value-to-fix).
-Each entry has the old address in the code replaced by old + $97C0 (the relocation offset).
-A zero entry terminates the table.
+The fix table at EXROM $1D00 is a list of single words — 61 of them, then a $0000
+terminator at $1D7A. Each word is the low-memory address of a 16-bit operand in
+the dispatcher code; OPEN-DFILE adds $97C0 to that address to find the moved
+operand, then adds $97C0 to the operand itself (EXROM $0DEE–$0E03). CLOSE-DFILE
+walks the same table subtracting $97C0.
+
+OPEN-DFILE does not touch ERRSP, LISTSP or MSTBOT; CHNG_VID adds $97C0 to all
+three after it returns (EXROM $0ED3–$0EE8).
 
 ---
 
@@ -112,8 +136,11 @@ The TS 2068 supports ROM and RAM cartridges via the DOCK connector.
 
 The HSR (port $F4) and DECR (port $FF) control which chunks come from which source.
 
-For a cartridge in all 8 chunks: HSR = $FF (all chunks from DOCK).
-For EXROM in chunks 0-1 only: HSR = $03.
+For a cartridge in all 8 chunks: HSR = $FF (all chunks from DOCK), DECR bit 7 = 0.
+For the EXROM: HSR = $01 with DECR bit 7 = 1. The EXROM is one 8K ROM at
+$0000–$1FFF of the extension bank (Technical Manual §2.1.4) and the stock ROMs
+only ever select it through HSR bit 0; what chunk 1 (or any higher chunk)
+returns with DECR bit 7 set is **(unverified)**.
 
 A cartridge can occupy any subset of the 8 chunks. The chunk specification in
 SYSCON (byte 4 of AROS entry, byte 4 of LROS entry) uses a bitmask:
@@ -193,12 +220,12 @@ A zero byte at the start of an entry (type=Inactive) acts as end-of-table.
 
 ## ROM Version Byte
 
-The HOME ROM contains a version byte at $0013 (decimal 19):
-```
-M0013   DEFB $FF    ; Version identifier. Would count down with ROM revisions.
-```
-Value $FF = version 1 (the only version released). Future ROM upgrades would have
-used lower values. Software can detect the ROM version by reading address $0013.
+**(unverified)** Timex-derived documentation describes $0013 (decimal 19) as a
+version byte — $FF = version 1, with later revisions counting down. The stock
+disassembly (`disassemblies/ts2068_home_rom_U16_stock.txt`) has no such label:
+$0013 is one of the `RST $38` ($FF) filler bytes after `WRCH` at $0010. It is
+$FF in both HOME ROM images in this repository, so it cannot tell them apart.
+See the $0013 note in `CLAUDE.md`.
 
 ---
 
@@ -223,8 +250,8 @@ to the machine stack frame that will be restored on any BASIC error.
 
 Default: $61FC (just below the machine stack base at $6200).
 
-When the second display file is open, MSTBOT ($5CC0) and ERRSP are updated to
-reflect the stack's new location near $F9C0.
+When the second display file is open, CHNG_VID adds $97C0 to MSTBOT ($5CC0),
+ERRSP and LISTSP, so MSTBOT = $F9C0 and the default ERRSP becomes $F9BC.
 
 Machine code programs that use the OS error system should save and restore ERRSP:
 ```asm

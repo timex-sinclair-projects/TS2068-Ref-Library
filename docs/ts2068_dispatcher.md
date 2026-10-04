@@ -23,7 +23,8 @@ machine stack from chunk 3 to chunk 7; failing to check causes a crash.
 **Reach the dispatcher with `CALL`, and pass the service code on the stack.**
 It is not passed in `A`.
 
-The dispatcher source (EXROM $1000, copied to $6000) begins:
+The dispatcher source (EXROM $1000, copied to $6200 by HOME INIT — HOME $0E15:
+`LD HL,$1000` / `LD DE,$6200` / `LD BC,$0630` / `LDIR`) begins:
 
 ```z80
         LD   IX,0
@@ -46,9 +47,12 @@ PRM_OUT, treating `(IX+0)/(IX+1)` as the return address. That fixes the layout:
 
 Push in this order: parameter data, PRM_OUT, PRM_IN, SVC_CODE — then CALL.
 
-SVC_CODE is 16-bit: bits 0-14 = service number, bit 15 = jump flag (set = the
-dispatcher does a GOTO_BANK instead of a CALL_BANK, so the service does not
-return to you).
+SVC_CODE is 16-bit: bits 0-14 = service number, bit 15 = jump flag. With bit 15
+set the dispatcher does a GOTO_BANK instead of a CALL_BANK: it moves your return
+address into the SVC_CODE slot and jumps to the service (EXROM $1052–$1071;
+GOTO_BANK discards its own return address and does `JP (IX)`), so PRM_IN /
+PRM_OUT are not used, only SVC_CODE need be pushed, and the service's `RET`
+comes straight back to the instruction after your `CALL`.
 
 **Standard call template (no stack parameters):**
 ```asm
@@ -59,9 +63,15 @@ return to you).
     PUSH DE              ; SVC_CODE
     LD   A, (VIDMOD)
     OR   A
-    CALL Z,  $6200       ; normal video
-    ...                  ; and CALL $F9C0 when VIDMOD <> 0
+    JR   NZ, hi
+    CALL $6200           ; normal video
+    JR   done
+hi: CALL $F9C0           ; VIDMOD <> 0 (dispatcher relocated)
+done:
 ```
+
+(Not `CALL Z,$6200` / `CALL NZ,$F9C0`: the second test would see the flags the
+service returned.)
 
 > An earlier revision of this file gave the template as `JP $6200`. That cannot
 > work: with a JP there is no return address on the stack, so `(IX+2)` would
@@ -90,12 +100,12 @@ return to you).
 
 | Code | Name     | Entry conditions | Description |
 |------|----------|-----------------|-------------|
-| $08  | CHNG_VID | —               | Change video mode |
+| $08  | CHNG_VID | —               | Change video mode — mis-targeted in the stock EXROM (table word $0EA3 is the operand of `LD DE,$0840` at $0EA2, skipping the prologue; see the note under Bank Switching) |
 | $09  | W_BORD   | —               | Write border color |
 | $0A–$0D | —   | —               | Reserved |
 | $1D  | SENDTV   | A = char code   | Output character to screen or printer |
 | $1E  | SETAT    | B = line (0–23), C = col (0–31) | Set print position |
-| $1F  | STTBYT   | HL = display address | Set attribute byte using ATTRT/MASKT/PFLAG |
+| $1F  | ATTBYT   | HL = display address | Set attribute byte using ATTRT/MASKT/PFLAG |
 | $20  | R_ATTS   | —               | Copy permanent attributes → temporary attribute vars |
 | $21  | CLLHS    | —               | Clear lower half of primary display file |
 | $22  | CLS      | —               | Clear entire primary display file |
@@ -120,8 +130,18 @@ return to you).
 | $10  | BANK_ENABLE | —     | Enable a bank |
 | $11  | GOTO_BANK   | —     | JP to routine in another bank (no return) |
 | $12  | CALL_BANK   | —     | CALL routine in another bank (returns) |
-| $13  | XFER_BANK   | —     | Transfer execution to another bank |
+| $13  | XFER_BYTES  | stack: banks, source, destination, length, direction | Copy a block of bytes between banks (EXROM $1522). Does not transfer control |
 | $14–$18 | —       | —     | Reserved |
+
+> **Stock-ROM table defects.** In the stock EXROM jump table the words for $11, $12
+> and $13 are one byte low — $6571, $65CF, $6721 instead of $6572, $65D0, $6722
+> (EXROM $1FDC/$1FDA/$1FD8). $11 and $13 land on a `RET` and do nothing; $12 lands
+> on an $FF byte, so it executes `RST $38` before falling into CALL_BANK. The word
+> for $08 is $0EA3, mid-instruction inside CHG_V ($0E8E). The community EXROM
+> revision fixes all four (`exrom_revision_analysis.md`). On a stock machine call
+> GOTO_BANK / CALL_BANK / XFER_BYTES directly at $6572 / $65D0 / $6722 (chunk 3;
+> $FD32 / $FD90 / $FEE2 in chunk 7), as the ROMs themselves do (EXROM $002D
+> `CALL $6572`, HOME $25FD `CALL $65D0`).
 
 ### Keyboard Services
 
@@ -148,7 +168,7 @@ return to you).
 | $27  | INIT    | DE=max RAM, A=0 cold/A=$FF NEW | — | Initialize system |
 | $2A  | INSERT  | HL=addr, BC=bytes | BC=0, DE=last inserted, HL=before first | Insert BC bytes before HL |
 | $2B  | RESET   | —     | —       | Reset calculator stack (STKEND=STKBOT, MEM=MEMBOT) |
-| $37  | RECLЕН  | HL→record | BC=length | Return length of program line, variable, or array |
+| $37  | RECLEN  | HL→record | BC=length | Return length of program line, variable, or array |
 | $38  | DELREC  | HL→record, BC=length | — | Delete record; update system variables |
 | $47  | CLEAR   | stack: new RAMTOP | — | CLEAR command |
 | $48  | CLR_BC  | BC = new RAMTOP | — | Set RAMTOP, delete vars, clear screen/calc stack |
@@ -164,8 +184,8 @@ return to you).
 | $2D  | CLCHAN  | BC = STRMS index | Close channel |
 | $2E  | OPEN    | stack: channel#, device spec | OPEN # command |
 | $2F  | OPCHAN  | stack: device spec; DE = STRMS pointer | Open channel |
-| $30  | CAT     | —     | CAT (not implemented) |
-| $31  | DELETE  | —     | DELETE (not implemented) |
+| $30  | CAT     | —     | CAT (not implemented: $30–$33 load B with the keyword token, skip the statement when syntax-checking, and give Error J when run — HOME $25C8–$25E1) |
+| $31  | ERASE   | —     | ERASE (not implemented) |
 | $32  | FORMAT  | —     | FORMAT (not implemented) |
 | $33  | MOVE    | —     | MOVE (not implemented) |
 | $54  | NOTKB?  | —     | Z if current channel is 'K' (keyboard/lower screen) |
@@ -274,6 +294,41 @@ return to you).
 
 ---
 
+## Jump Table (EXROM $1EDC–$1FFF)
+
+Checked word by word against `TS2068_U20.BIN`. The word for code n is at
+EXROM $1FFE − 2n. The dispatcher picks the bank by code range only: codes
+$00–$0D run in the EXROM, $0E–$18 in the RAM-resident code (addresses $6xxx =
+EXROM + $5200), $19 and above in the HOME ROM. Codes $0A–$0D and $14–$18 hold
+$FFFF (reserved). The table ends at code $91; there is no upper range check, so
+a larger code reads whatever precedes the table ($0000 for $92–$9F).
+
+```
+$00=0068  $01=00FC  $02=0189  $03=018D  $04=01AB  $05=05CC  $06=06E5  $07=0851
+$08=0EA3  $09=00E5  $0E=6405  $0F=645E  $10=6499  $11=6571  $12=65CF  $13=6721
+$19=02E1  $1A=03F3  $1B=0436  $1C=0A02  $1D=0500  $1E=05B2  $1F=0710  $20=0888
+$21=08A9  $22=08EA  $23=0A23  $24=0A4A  $25=0D0D  $26=0D1D  $27=0D31  $28=11E1
+$29=1230  $2A=12BB  $2B=1354  $2C=139F  $2D=13BE  $2E=142A  $2F=1465  $30=25C8
+$31=25D4  $32=25CC  $33=25D0  $34=160D  $35=16D6  $36=16F0  $37=1720  $38=1750
+$39=1788  $3A=1A27  $3B=1AD8  $3C=1C78  $3D=1C59  $3E=1D55  $3F=1D97  $40=1E82
+$41=1ECA  $42=1ED4  $43=1EE4  $44=1EF1  $45=1F1E  $46=1F23  $47=1F36  $48=1F39
+$49=1F99  $4A=1FBB  $4B=1FD4  $4C=1FEB  $4D=2009  $4E=201D  $4F=2155  $50=2159
+$51=217E  $52=222B  $53=226B  $54=2380  $55=23DE  $56=241D  $57=2603  $58=2635
+$59=263E  $5A=2660  $5B=2679  $5C=26DB  $5D=2810  $5E=2854  $5F=288E  $60=28D7
+$61=29B6  $62=29E5  $63=29F2  $64=2C70  $65=2E70  $66=2E74  $67=2EBD  $68=2FAF
+$69=2FC0  $6A=3059  $6B=30E6  $6C=30E9  $6D=30F9  $6E=3160  $6F=3193  $70=31A1
+$71=33CE  $72=33D3  $73=3468  $74=3489  $75=356E  $76=35D3  $77=3656  $78=3ABB
+$79=3ACA  $7A=3ADF  $7B=3B2E  $7C=3B9E  $7D=3BC5  $7E=3BD0  $7F=3BF5  $80=3BFD
+$81=3C4E  $82=3C5E  $83=3C65  $84=3C6C  $85=11CF  $86=11ED  $87=0010  $88=02B0
+$89=053A  $8A=0554  $8B=0566  $8C=073F  $8D=08A6  $8E=0939  $8F=2624  $90=2813
+$91=1795
+```
+
+$08, $11, $12 and $13 are the stock-ROM defects described under Bank Switching
+Services.
+
+---
+
 ## SUBLIN Detail ($36)
 
 Searches a BASIC line (HL) for a statement.
@@ -287,18 +342,22 @@ Searches a BASIC line (HL) for a statement.
 ## Floating Point Number Format (5 bytes)
 
 ```
-Byte 0: Exponent (biased by $80; $00 = value is 0)
-Byte 1: Sign in bit 7 (1=negative); bits 6-0 = mantissa bits 54-48
-Bytes 2-4: Mantissa bits 47-24 (most significant first)
+Byte 0: Exponent (biased by $80); $00 = small-integer form (below), not "zero"
+Bytes 1-4: 32-bit mantissa, most significant byte first. Bit 7 of byte 1 is the
+           sign (1 = negative), standing in for the mantissa's implied leading 1
 ```
 
-For small integers (0–65535), the format is:
+For small integers (−65535 to +65535), the format is:
 ```
-Byte 0: $00 (flag: integer follows)
-Byte 1: $00
-Byte 2: sign (0=positive, $FF=negative)
-Bytes 3-4: 2-byte integer (MSB first)
+Byte 0: $00 (integer form)
+Byte 1: sign ($00 = positive, $FF = negative)
+Bytes 2-3: 16-bit value, LSB first (two's complement when negative)
+Byte 4: $00
 ```
+
+Zero is the integer form `00 00 00 00 00`. Evidence: STK_BC ($30E9) stores
+`A=0, E=0, D=C, C=B, B=0` through $2E74 (AEDCB), i.e. `00 00 lo hi 00`; STDE_S
+($314C) writes `00, sign, lo, hi, 00` with the value negated when the sign is $FF.
 
 ---
 

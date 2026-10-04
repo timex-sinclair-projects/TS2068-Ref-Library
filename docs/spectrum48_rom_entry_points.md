@@ -37,8 +37,9 @@ For TS 2068 equivalents, see `ts2068_vs_spectrum48_comparison.md`.
 | $0078 | TEMP-PTR2 | Store HL → CH_ADD; load A ← (HL); return |
 | $007D | SKIP-OVER | Skip embedded control codes $10–$17; return NC if char is printable |
 
-**NMI bug note:** `JR NZ, NO-RESET` should be `JR Z`. Non-zero NMIADD resets
-the machine; zero NMIADD returns. **Identical bug exists in TS 2068 HOME ROM.**
+**NMI bug note:** `JR NZ, NO-RESET` should be `JR Z`. Zero NMIADD falls through to
+`JP (HL)` = `JP $0000` and resets the machine; non-zero NMIADD returns without
+calling the handler. **Identical bug exists in TS 2068 HOME ROM** ($006D = $20).
 
 ---
 
@@ -73,8 +74,9 @@ the machine; zero NMIADD returns. **Identical bug exists in TS 2068 HOME ROM.**
 | $03B5 | BEEPER | Low-level tone generator. Toggles EAR bit (port $FE) at precise timing |
 | $03F8 | beep | BEEP command: convert BASIC pitch/duration params, call BEEPER |
 
-**TS 2068 note:** Both routines moved. Use dispatcher service $19 (or direct
-ROM call ~$0605/$0507) on the TS 2068.
+**TS 2068 note:** Both routines moved. On the TS 2068 use dispatcher service $1A
+(PARP, = BEEPER, HOME $03F3) or $1B (BEEP, HOME $0436). Service $19 is UPD_K,
+the keyboard handler.
 
 ---
 
@@ -107,12 +109,12 @@ All tape routines are in the Spectrum HOME ROM. **On TS 2068 these are in EXROM.
 | $0E00 | CL-SCROLL | Scroll screen up one line. B=number of lines to scroll |
 | $15F2 | PRINT-A-2 | Write char in A to current output stream (actual implementation, called by RST $10) |
 
-**TS 2068 mapping:**
-- PRINT-OUT → ~$0F2C
-- CLS → ~$0DAF
-- CLS-LOWER → ~$0A4E
-- PRINT-A-2 → ~$0DD9 (same name, different address)
-- CL-SCROLL → ~$0D6B
+**TS 2068 mapping** (verified against the stock HOME ROM):
+- PRINT-OUT → $0500 (SENDTV)
+- CLS → $08A6 (K_CLS); CL-ALL → $08EA (CLS)
+- CLS-LOWER → $08A9 (CLLHS)
+- PRINT-A-2 → $11ED (SENDCH; RST $10 target)
+- CL-SCROLL → $093B (SCRLB)
 
 ---
 
@@ -145,10 +147,10 @@ All tape routines are in the Spectrum HOME ROM. **On TS 2068 these are in EXROM.
 | Address | Name | Description |
 |---------|------|-------------|
 | $11B7 | NEW | NEW command: jump to START-NEW with A=$FF (warm start) |
-| $11CB | START-NEW | **Main init entry point.** DE=$FFFF=cold; A=$FF=warm. Sets up RAM, clears BASIC, calls MAIN-EXEC. **SAME ADDRESS IN TS 2068** |
+| $11CB | START-NEW | **Main init entry point.** DE=$FFFF=cold; A=$FF=warm. Sets up RAM, clears BASIC, calls MAIN-EXEC. TS 2068 equivalent: INIT $0D31 (RST 0 → `JP $0D31`); $11CB on the 2068 is inside stream data |
 | $11DA | ram-check | RAM size detection loop |
 | $1219 | RAM-SET | Set minimum system — SET-MIN equivalent |
-| $121C | NMI_VECT | NMI default handler vector address |
+| $121C | NMI_VECT | NMI default handler vector address **(unverified)** |
 
 ---
 
@@ -176,8 +178,8 @@ All tape routines are in the Spectrum HOME ROM. **On TS 2068 these are in EXROM.
 | $169E | RESERVE | Allocate BC bytes in workspace above WORKSP; called by BC-SPACES (RST $30) |
 | $16B0 | SET-MIN | Reset workspace to minimum: clear vars, reset STKBOT/STKEND/MEM |
 | $16C5 | SET-STK | Reset calculator stack and MEM pointer; JP to error recovery |
-| $19E5 | RECLAIM-1 | Reclaim memory from HL to DE. Calls DIFFER, then RECLAIM-2. **SAME ADDRESS IN TS 2068** |
-| $19E8 | RECLAIM-2 | Reclaim BC bytes from address in DE. Updates all higher pointers. **SAME ADDRESS IN TS 2068** |
+| $19E5 | RECLAIM-1 | Reclaim memory from HL to DE. Calls DIFFER, then RECLAIM-2. TS 2068: $174D (DEL_DE) |
+| $19E8 | RECLAIM-2 | Reclaim BC bytes from address in DE. Updates all higher pointers. TS 2068: $1750 (DELREC) |
 
 ---
 
@@ -249,8 +251,9 @@ Entry via `RST $28` followed by opcode bytes, terminated by `$38` (end-calc).
 | $335B | CALCULATE | Calculator entry point — same as RST $28 target |
 | $335E | GEN-ENT-1 | Internal calculator entry used for recursive calls |
 
-Calculator opcode set is identical to TS 2068. See `ts2068_rom_entry_points.md`
-for the full opcode table ($01–$3F plus memory opcodes $A0–$E5).
+Calculator opcode set is identical to TS 2068 (2068 interpreter at $371A,
+GEN-ENT-1 at $371D). See `ts2068_rom_entry_points.md` for the full opcode table
+($00–$3D, plus the $80–$FF series, constant and memory groups).
 
 ---
 
@@ -258,7 +261,7 @@ for the full opcode table ($01–$3F plus memory opcodes $A0–$E5).
 
 | Address | Name | Description |
 |---------|------|-------------|
-| $3D00 | char-set | 96-character bitmap set, 8 bytes per character. Space ($20) through © ($7F). **Identical to TS 2068** |
+| $3D00 | char-set | 96-character bitmap set, 8 bytes per character. Space ($20) through © ($7F). Same address on the TS 2068; byte-identity **(unverified)** |
 
 ---
 

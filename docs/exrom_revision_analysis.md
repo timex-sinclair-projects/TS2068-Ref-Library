@@ -49,12 +49,12 @@ The well-documented NMI branch inversion bug. With `JR NZ`, a zero NMIADD falls 
 | Address | Original | Revised | Service | Verified |
 |---------|----------|---------|---------|----------|
 | $1FD8 | $6721 | $6722 | XFER_BYTES | Original points to RET ($C9) at end of previous routine |
-| $1FDA | $65CF | $65D0 | CALL_BANK | Original points to $FF padding byte |
+| $1FDA | $65CF | $65D0 | CALL_BANK | Original points to the $FF high byte of the BS_SP word ($13CE–$13CF) |
 | $1FDC | $6571 | $6572 | GOTO_BANK | Original points to RET ($C9) at end of previous routine |
 
 Confirmed by examining the actual bytes at the original addresses:
 - $1521 = $C9 (RET), $1522 = $F5 (PUSH AF) — XFER_BYTES starts at $1522
-- $13CF = $FF (padding), $13D0 = $E3 (EX (SP),HL) — CALL_BANK starts at $13D0
+- $13CF = $FF (high byte of BS_SP, `DEFW $FFFF` at $13CE), $13D0 = $E3 (EX (SP),HL) — CALL_BANK starts at $13D0
 - $1371 = $C9 (RET), $1372 = $DD (LD IX,...) — GOTO_BANK starts at $1372
 
 RAM addresses are ROM + $5200. The original source disassembly already noted the XFER_BYTES discrepancy: `DEFW $6721 ;XFER_BYTES?($6722)`.
@@ -67,9 +67,9 @@ These services were only reachable through the BEU dispatcher interface, so the 
 |---------|----------|---------|---------|
 | $1FEE | $0EA3 | $0E8E | CHG_V (service $08) |
 
-Confirmed: CHG_V's prologue `PUSH BC; PUSH DE; PUSH HL; PUSH AF` ($C5 D5 E5 F5) is at $0E8E. The original dispatch entry $0EA3 is 21 bytes past the prologue, skipping the register saves entirely. Calling CHG_V through the dispatcher with the original table would corrupt BC/DE/HL/AF on return.
+Confirmed: CHG_V's prologue `PUSH BC; PUSH DE; PUSH HL; PUSH AF` ($C5 D5 E5 F5) is at $0E8E. The original dispatch entry $0EA3 is 21 bytes past the prologue and is not even an instruction boundary: it is the operand byte of `LD DE,$0840` at $0EA2. Calling CHG_V through the dispatcher with the original table would execute a misaligned byte stream with the register saves skipped.
 
-**Note:** CHG_V is also called directly (not through the dispatch table) by the OPEN-DFILE code, so the direct-call path was unaffected.
+**Note:** neither ROM calls CHG_V directly (no `CALL`/`JP $0E8E` or `$0EA3` in either stock image); it is the other way round — CHG_V calls OPEN-DFILE (`CALL $0DB0` at $0ED0) and CLOSE-DFILE (`CALL $0E27` at $0F01). So the dispatch entry is the only way in, and in the stock ROM it is broken.
 
 ### 4. CALL_BANK Parameter Offset ($1410) — 1 byte
 
@@ -77,9 +77,11 @@ Confirmed: CHG_V's prologue `PUSH BC; PUSH DE; PUSH HL; PUSH AF` ($C5 D5 E5 F5) 
 |---------|----------|---------|
 | $1410 | $08 | $09 |
 
-Original: `LD C,(IX+$08) / LD B,(IX+$08)` — loads both B and C from offset +8 (DEST_BANK), never reading SRC_BANK at offset +9.
+Original: `LD C,(IX+PRM_OUT) / LD B,(IX+PRM_OUT)` with `PRM_OUT = 8` — in CALL_BANK, (IX+8)/(IX+9) are the low and high bytes of the PRM_OUT parameter word (IX = SP after `PUSH DE / PUSH BC / PUSH AF`, above the saved HL). The original reads the low byte twice, so BC = PRM_OUT low × 257 instead of PRM_OUT. BC + 14 is then the byte count for the `LDIR` that makes room for the bank status.
 
-Revised: `LD C,(IX+$08) / LD B,(IX+$09)` — correctly reads DEST_BANK into C and SRC_BANK into B.
+Revised: `LD C,(IX+$08) / LD B,(IX+$09)` — BC = PRM_OUT, as intended.
+
+(An earlier revision of this document explained these offsets as DEST_BANK/SRC_BANK. Those names are the +8/+9 offsets used by MOVE_BYTES and XFER_BYTES, not CALL_BANK.)
 
 ### 5. Interrupt Protection During Bank Switching — 4 bytes
 
@@ -87,10 +89,10 @@ Revised: `LD C,(IX+$08) / LD B,(IX+$09)` — correctly reads DEST_BANK into C an
 |---------|----------|---------|---------|
 | $129A | $C5 (`PUSH BC`) | $F3 (`DI`) | BANK_ENABLE entry |
 | $131B | $C1 (`POP BC`) | $FB (`EI`) | BANK_ENABLE exit |
-| $134A | $F5 (`PUSH AF`) | $F3 (`DI`) | SAVE_STATUS entry |
+| $134A | $F5 (`PUSH AF`) | $F3 (`DI`) | RESTORE_STATUS entry |
 | $1370 | $F1 (`POP AF`) | $FB (`EI`) | RESTORE_STATUS exit |
 
-Adds DI/EI bracketing around bank-switch operations. An interrupt occurring mid-switch could execute code from a partially-configured bank mapping, causing a crash. The replaced PUSH/POP instructions appear to have been redundant saves (the registers are saved elsewhere in these routines).
+Adds DI/EI bracketing around BANK_ENABLE ($1299–$131D) and RESTORE_STATUS ($134A–$1371); SAVE_STATUS ($131E–$1349) is not changed. An interrupt occurring mid-switch could execute code from a partially-configured bank mapping, causing a crash. The cost is the replaced saves: in BANK_ENABLE the `PUSH BC`/`POP BC` is no longer needed once group 14 removes the `RR C` that was the routine's only write to C; in RESTORE_STATUS, AF is no longer preserved (the routine loads A from the status buffer).
 
 ---
 
@@ -228,13 +230,24 @@ Restructured logic for determining which bank (HOME/DOCK/EXT) owns a given memor
 | $1D3A | $6516 | $6517 |
 | $1D68 | $674F | $6744 |
 
-The fix table contains addresses that need patching when the dispatcher relocates from $6200 to $F7C0 (for second display file mode). These adjustments are necessary consequences of the code changes in Groups 5 and 11-12, but their correctness depends on those rewrites being correct.
+The fix table (EXROM $1D00, 61 words, zero-terminated) lists the RAM addresses of the absolute-address operands that need patching when OPEN-DFILE moves the $6000–$683F block (machine stack $6000–$61FF, dispatcher code $6200–$682F) up by $97C0 to $F7C0–$FFFF, so the dispatcher goes from $6200 to $F9C0 (EXROM $0DDD–$0E03: `LD DE,$F7C0 / LD HL,$6000 / LD BC,$0840 / LDIR`, then add $97C0 to the word at each table entry + $97C0). CLOSE-DFILE subtracts it again ($0E48–$0E64).
+
+**These are fixes to verified stock-ROM bugs, not consequences of the other revisions.** None of groups 5, 11 or 12 moves an operand. In the stock table four entries point one byte off, at a CALL opcode or at the middle of an instruction, so the real operand is never relocated and two code bytes are corrupted instead while the second display file is open:
+
+| Entry | Stock word | Points at (ROM) | Correct operand |
+|-------|-----------|-----------------|-----------------|
+| $1D34 | $64AC | $12AC: operand of `LD D,$A0` + `PUSH AF` opcode | $64A9 — `CALL $635C` at $12A8 |
+| $1D38 | $650E | $130E: `CALL $635C` opcode | $650F |
+| $1D3A | $6516 | $1316: `CALL $635C` opcode | $6517 |
+| $1D68 | $674F | $154F: `CALL $66E8` opcode (its operand $6750 is already the next entry) | $6744 — `CALL $651E` at $1543, missing from the stock table |
+
+Checked by sweeping $1000–$162F of both images for 3-byte instructions with an operand in $6000–$683F: the stock table misses exactly these four operands and the revised table misses none. All four sit in the BEU paths of BANK_ENABLE and in XFER_BYTES, so they only bite when those services run with the second display file open. Because CLOSE-DFILE undoes the same additions, the damage is reversed on close.
 
 ---
 
 ## What Was NOT Changed
 
-- **CLOSE-DFILE ($0E27):** Known bug persists (cannot reliably close second display file)
+- **CLOSE-DFILE ($0E27):** code unchanged. The "cannot reliably close" bug often reported for it is **(unverified)** — read in isolation the routine mirrors OPEN-DFILE; the fix-table entries it uses are corrected by group 13
 - **Tape routines ($0068-$01AA):** No timing adjustments for 3.528 MHz clock
 - **HOME ROM NMI handler ($0066):** Separate chip, not addressed here
 - **All BASIC parsing and execution code:** Unchanged
@@ -275,19 +288,19 @@ $0A89    $FE   $00   PRSCAN: (operand) → NOP
 $0B1B    $00   $FF   Cart init: LD C,$00 → LD C,$FF
 $0B49    $00   $FF   Cart init: LD C,$00 → LD C,$FF
 $110E    $20   $28   NMI handler: JR NZ → JR Z
-$1140    $F5   $D5   GET_WORD: PUSH AF → PUSH DE
-$1150    $73   $C1   GET_WORD: LD (HL),E → POP BC
-$1151    $23   $D1   GET_WORD: INC HL → POP DE
-$1152    $72   $73   GET_WORD: LD (HL),D → LD (HL),E
-$1153    $2B   $23   GET_WORD: DEC HL → INC HL
-$1154    $C1   $72   GET_WORD: POP BC → LD (HL),D
-$1155    $F1   $2B   GET_WORD: POP AF → DEC HL
+$1140    $F5   $D5   PUT_WORD: PUSH AF → PUSH DE
+$1150    $73   $C1   PUT_WORD: LD (HL),E → POP BC
+$1151    $23   $D1   PUT_WORD: INC HL → POP DE
+$1152    $72   $73   PUT_WORD: LD (HL),D → LD (HL),E
+$1153    $2B   $23   PUT_WORD: DEC HL → INC HL
+$1154    $C1   $72   PUT_WORD: POP BC → LD (HL),D
+$1155    $F1   $2B   PUT_WORD: POP AF → DEC HL
 $120B    $2E   $24   GET_STATUS: branch target
 $120F    $1D   $37   GET_STATUS: branch target
 $1212    $1F   $27   GET_STATUS: branch target
 $129A    $C5   $F3   BANK_ENABLE: PUSH BC → DI
 $131B    $C1   $FB   BANK_ENABLE: POP BC → EI
-$134A    $F5   $F3   SAVE_STATUS: PUSH AF → DI
+$134A    $F5   $F3   RESTORE_STATUS: PUSH AF → DI
 $1370    $F1   $FB   RESTORE_STATUS: POP AF → EI
 $1410    $08   $09   CALL_BANK: LD B,(IX+8) → LD B,(IX+9)
 $14DF    $75   $73   MOVE_BYTES: LD (IX+4),L → LD (IX+4),E
@@ -309,6 +322,12 @@ $12D2    $CB   $FF   BANK_ENABLE: (RR C) → (SET 7,A)     (group 14)
 $12D3    $19   $18   BANK_ENABLE: (RR C) → JR            (group 14)
 $12D4    $3F   $ED   BANK_ENABLE: CCF → (JR displacement)(group 14)
 ```
+
+The $1140/$1150–$1155 bytes are in PUT_WORD ($113B–$115B; GET_WORD is $1116–$113A),
+not GET_WORD as an earlier revision said. The stock PUT_WORD does `LD D,B` (save
+the bank number) before `LD (HL),E / INC HL / LD (HL),D`, so it writes the bank
+number as the high byte of the word; the revision saves DE on the stack instead
+(`PUSH DE` … `POP BC / POP DE`) so the caller's D is stored.
 
 The two rewrite blocks are not listed byte by byte:
 `$1230-$1249` (23 of those 26 addresses differ) and `$1271-$1298`

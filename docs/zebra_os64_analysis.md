@@ -32,7 +32,7 @@ The infamous inverted-logic bug in the NMI handler is **fixed**.
 |---------|----------|-------|----------|
 | $006D | $20 | $28 | `JR NZ` → `JR Z` |
 
-The original code jumps to the user NMI handler when USRNMI is zero (no handler set) and falls through to RETN when it's non-zero — exactly backwards. The Zebra ROM corrects this so `JR Z` skips `JP (HL)` when HL=0.
+In the stock ROM ($0068: `LD HL,($5CB0)`), a zero USRNMI falls through to `JP (HL)` with HL = 0 — a reset — while a non-zero USRNMI branches to `RETN` without ever calling the handler — exactly backwards. The Zebra ROM corrects this so `JR Z` skips `JP (HL)` when HL=0.
 
 ---
 
@@ -92,7 +92,7 @@ $04F6: RES 5,H
 
 ### PAPER Color via DECR Port ($23F0-$2401)
 
-The attribute-based color system is bypassed entirely. Paper color is written directly to the DECR register (port $FF) bits 5-3:
+The attribute-based color system is bypassed entirely. The color is written directly to the DECR register (port $FF) bits 5-3. Note that in 64-column mode the hardware treats bits 5-3 as the **ink** color, with the paper as its complement (Technical Manual §3 mode table and §5.2.3), so the value this routine writes becomes the ink:
 
 ```z80
 $23F0: LD A,C
@@ -128,7 +128,7 @@ $002B: RRCA
        RET
 ```
 
-Used by 64-column display code for pixel manipulation with half-width (4-pixel) characters.
+Used by 64-column display code for pixel manipulation. (A 64-column character is still a full 8-dot display byte, from DF1 for even columns and DF2 for odd; its dots are half width, so it is as wide as 4 standard pixels.)
 
 ### RST $10 Alternate Entry ($0013-$0017)
 
@@ -350,7 +350,7 @@ The Zebra ROM uses RAM at $FFE2-$FFFF for printer and system state:
 | 65518 | $FFEE | 1 | PRDAT_typ | Printer data type: 0=character, 1=control/graphics |
 | 65519 | $FFEF | 1 | LINE | COPY routine: current screen line |
 | 65520 | $FFF0 | 1 | Ypos | COPY routine internal |
-| 65521 | $FFF1 | 2 | USRNMI | NMI handler address (inherited from original ROM) |
+| 65521 | $FFF1 | 2 | USRNMI | NMI handler address per the OS-64 manual **(unverified)**. Not inherited from the stock ROM, whose USRNMI is $5CB0 (HOME $0068: `LD HL,($5CB0)`) |
 | 65523 | $FFF3 | 2 | IFDR_addr | Interface driver routine address (default $3FA7) |
 | 65525 | $FFF5 | 1 | WDTH | Printer output width (default 64, max 255) |
 | 65526 | $FFF6 | 1 | — | Unused |
@@ -391,9 +391,9 @@ POKE 65531, 19     : REM left margin at column 19
 
 The Zebra OS-64 is a well-crafted ROM modification that:
 
-1. **Enables 64-column text** by patching column counts, rewriting pixel handling for 4-pixel-wide characters, and implementing dual-bank display operations
+1. **Enables 64-column text** by patching column counts, rewriting pixel handling for half-width (4-standard-pixel-wide) characters, and implementing dual-bank display operations
 2. **Fixes the NMI handler bug** — a single-byte correction that Timex never shipped
-3. **Removes the attribute system** — 64-column mode has no per-character color attributes; paper color is set globally via the DECR port
+3. **Removes the attribute system** — 64-column mode has no per-character color attributes; the ink color (and with it the complementary paper) is set globally via the DECR port
 4. **Replaces ZX Printer support with Centronics** — full LPRINT/LLIST/COPY through a channel-based system supporting five interface types (Aerco, Tasman-B, Tasman-C, A&J, Oliger) plus custom drivers
 5. **Relocates the character set to RAM** ($7800) — the original ROM font area ($3D00-$3FFF) is repurposed for init code and the entire Centronics printer subsystem
 6. **Provides Epson-compatible COPY** — screen dumps use ESC @ (reset), ESC A (line spacing), and ESC L (graphics mode) for dot-addressable output

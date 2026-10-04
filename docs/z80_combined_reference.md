@@ -14,13 +14,18 @@ Corrections and TS 2068-specific notes added.
 IY is permanently set to $5C3A (ERR_NR) and used for IY-relative system
 variable access throughout the ROM. Any code that modifies IY will silently
 corrupt system variables. Never use IY as a general-purpose register in
-TS 2068 programs. Use IX instead, or use the undocumented IYH/IYL half
-registers for temporary scratch (with care).
+TS 2068 programs. Use IX instead. The IM 1 interrupt routine itself uses IY
+(ROM `$0045`: `INC (IY+$40)` — FRAMES2, the frame counter's high byte — when the 16-bit FRAMES wraps; the keyboard scan it calls
+uses `(IY+…)` too), so IY — including either half, IYH or IYL — may only be
+borrowed with interrupts disabled and must be back at $5C3A before `EI`.
 
 **TS 2068 clock and frame timing:**
 - CPU clock: 3.528 MHz
-- T-states per frame: ~58,800 (60 Hz display)
-- One frame ≈ 16.67 ms
+- T-states per frame: 58,688 (262 lines × 224 T-states; 60.11 Hz) — from the
+  technical manual §2.1.8.3: 14.112 MHz ÷ 896 = 15.75 kHz lines, 262 lines per
+  frame, "60.1145 Hz vertical sync"; 896 master clocks = 224 CPU T-states.
+  Contention with the video fetch lengthens real code timings.
+- One frame ≈ 16.64 ms
 
 Useful for BEEP timing loops, animation pacing, and interrupt-driven code.
 
@@ -83,7 +88,7 @@ added to the base opcode.
 
 **Column key:** `Clk` = T-states | `Sz` = bytes | `SZHPNC` = flag effects | `Opcode` = hex
 
-For conditional instructions showing two clock values (e.g. `17/1`): first value
+For conditional instructions showing two clock values (e.g. `17/10`): first value
 is when the condition is met (branch taken); second is when it is not.
 
 Flag columns are inherited from the first row of each instruction group —
@@ -97,7 +102,7 @@ ADC A,N         7   2           CE XX
 ADC A,(HL)      7   1           8E
 ADC A,(IX+N)   19   3           DD 8E XX
 ADC A,(IY+N)   19   3           FD 8E XX
-ADC HL,BC      15   2   **?V0*  ED 4A           HL = HL + ss + CY
+ADC HL,BC      15   2   ***V0*  ED 4A           HL = HL + ss + CY; H = carry from bit 11
 ADC HL,DE      15   2           ED 5A
 ADC HL,HL      15   2           ED 6A
 ADC HL,SP      15   2           ED 7A
@@ -107,20 +112,20 @@ ADD A,N         7   2           C6 XX
 ADD A,(HL)      7   1           86
 ADD A,(IX+N)   19   3           DD 86 XX
 ADD A,(IY+N)   19   3           FD 86 XX
-ADD HL,BC      11   1   --?-0*  09              HL = HL + ss
+ADD HL,BC      11   1   --*-0*  09              HL = HL + ss; H = carry from bit 11
 ADD HL,DE      11   1           19
 ADD HL,HL      11   1           29
 ADD HL,SP      11   1           39
-ADD IX,BC      15   2   --?-0*  DD 09           IX = IX + pp
+ADD IX,BC      15   2   --*-0*  DD 09           IX = IX + pp
 ADD IX,DE      15   2           DD 19
 ADD IX,IX      15   2           DD 29
 ADD IX,SP      15   2           DD 39
-ADD IY,BC      15   2   --?-0*  FD 09           IY = IY + rr
+ADD IY,BC      15   2   --*-0*  FD 09           IY = IY + rr
 ADD IY,DE      15   2           FD 19
 ADD IY,IY      15   2           FD 29
 ADD IY,SP      15   2           FD 39
 ─────────────────────────────────────────────────────────────────────────────────
-AND r           4   1   ***P00  A0+rb           A = A & s
+AND r           4   1   **1P00  A0+rb           A = A & s
 AND N           7   2           E6 XX
 AND (HL)        7   1           A6
 AND (IX+N)     19   3           DD A6 XX
@@ -132,16 +137,16 @@ BIT b,(IX+N)   20   4           DD CB XX 46+8*b
 BIT b,(IY+N)   20   4           FD CB XX 46+8*b
 ─────────────────────────────────────────────────────────────────────────────────
 CALL NN        17   3   ------  CD XX XX        Unconditional call; -(SP)=PC, PC=nn
-CALL C,NN    17/1   3           DC XX XX        If Carry = 1
-CALL NC,NN   17/1   3           D4 XX XX        If Carry = 0
-CALL M,NN    17/1   3           FC XX XX        If Sign = 1 (negative)
-CALL P,NN    17/1   3           F4 XX XX        If Sign = 0 (positive)
-CALL Z,NN    17/1   3           CC XX XX        If Zero = 1
-CALL NZ,NN   17/1   3           C4 XX XX        If Zero = 0
-CALL PE,NN   17/1   3           EC XX XX        If Parity = 1 (even)
-CALL PO,NN   17/1   3           E4 XX XX        If Parity = 0 (odd)
+CALL C,NN   17/10   3           DC XX XX        If Carry = 1
+CALL NC,NN  17/10   3           D4 XX XX        If Carry = 0
+CALL M,NN   17/10   3           FC XX XX        If Sign = 1 (negative)
+CALL P,NN   17/10   3           F4 XX XX        If Sign = 0 (positive)
+CALL Z,NN   17/10   3           CC XX XX        If Zero = 1
+CALL NZ,NN  17/10   3           C4 XX XX        If Zero = 0
+CALL PE,NN  17/10   3           EC XX XX        If Parity = 1 (even)
+CALL PO,NN  17/10   3           E4 XX XX        If Parity = 0 (odd)
 ─────────────────────────────────────────────────────────────────────────────────
-CCF             4   1   --?-0*  3F              Complement Carry; CY = ~CY
+CCF             4   1   --*-0*  3F              Complement Carry; CY = ~CY; H = old CY
 ─────────────────────────────────────────────────────────────────────────────────
 CP r            4   1   ***V1*  B8+rb           Compare A-s; flags set, A unchanged
 CP N            7   2           FE XX
@@ -149,9 +154,9 @@ CP (HL)         7   1           BE
 CP (IX+N)      19   3           DD BE XX
 CP (IY+N)      19   3           FD BE XX
 CPD            16   2   ****1-  ED A9           A-(HL); HL=HL-1; BC=BC-1
-CPDR         21/1   2           ED B9           CPD until A=(HL) or BC=0
+CPDR        21/16   2           ED B9           CPD until A=(HL) or BC=0
 CPI            16   2   ****1-  ED A1           A-(HL); HL=HL+1; BC=BC-1
-CPIR         21/1   2           ED B1           CPI until A=(HL) or BC=0
+CPIR        21/16   2           ED B1           CPI until A=(HL) or BC=0
 ─────────────────────────────────────────────────────────────────────────────────
 CPL             4   1   --1-1-  2F              A = ~A (one's complement)
 ─────────────────────────────────────────────────────────────────────────────────
@@ -176,7 +181,7 @@ DEC IY         10   2           FD 2B
 ─────────────────────────────────────────────────────────────────────────────────
 DI              4   1   ------  F3              Disable maskable interrupts
 ─────────────────────────────────────────────────────────────────────────────────
-DJNZ $+2     13/8   1   ------  10 XX           B = B-1; jump if B ≠ 0 (signed offset)
+DJNZ $+2     13/8   2   ------  10 XX           B = B-1; jump if B ≠ 0 (signed offset)
 ─────────────────────────────────────────────────────────────────────────────────
 EI              4   1   ------  FB              Enable maskable interrupts
 ─────────────────────────────────────────────────────────────────────────────────
@@ -194,14 +199,14 @@ IM 1            8   2           ED 56           Interrupt mode 1 (RST $38 on int
 IM 2            8   2           ED 5E           Interrupt mode 2 (vector table via I reg)
 ─────────────────────────────────────────────────────────────────────────────────
 IN A,(N)       11   2   ------  DB XX           A = port(A:N); upper addr byte = A
-IN A,(C)       12   2   ***P0-  ED 78           A = port(BC); flags set
+IN A,(C)       12   2   **0P0-  ED 78           A = port(BC); flags set
 IN B,(C)       12   2           ED 40           r = port(BC); 16-bit port address
 IN C,(C)       12   2           ED 48
 IN D,(C)       12   2           ED 50
 IN E,(C)       12   2           ED 58
 IN H,(C)       12   2           ED 60
 IN L,(C)       12   2           ED 68
-IN (C)         12   2   ***P0-  ED 70           Read port to nowhere; flags only (undocumented)
+IN (C)         12   2   **0P0-  ED 70           Read port to nowhere; flags only (undocumented)
 ─────────────────────────────────────────────────────────────────────────────────
 INC A           4   1   ***V0-  3C              r = r + 1
 INC B           4   1           04
@@ -221,22 +226,22 @@ INC IX         10   2   ------  DD 23           xx = xx + 1
 INC IY         10   2           FD 23
 ─────────────────────────────────────────────────────────────────────────────────
 IND            16   2   ?*??1-  ED AA           (HL)=port(BC); HL=HL-1; B=B-1
-INDR         21/1   2   ?1??1-  ED BA           IND until B=0
+INDR        21/16   2   ?1??1-  ED BA           IND until B=0
 INI            16   2   ?*??1-  ED A2           (HL)=port(BC); HL=HL+1; B=B-1
-INIR         21/1   2   ?1??1-  ED B2           INI until B=0
+INIR        21/16   2   ?1??1-  ED B2           INI until B=0
 ─────────────────────────────────────────────────────────────────────────────────
 JP NN          10   3   ------  C3 XX XX        Unconditional jump; PC=nn
 JP (HL)         4   1           E9              PC = HL (not indirect — jumps to address in HL)
 JP (IX)         8   2           DD E9           PC = IX
 JP (IY)         8   2           FD E9           PC = IY
-JP C,NN      10/1   3           DA XX XX        If Carry = 1
-JP NC,NN     10/1   3           D2 XX XX        If Carry = 0
-JP M,NN      10/1   3           FA XX XX        If Sign = 1 (negative)
-JP P,NN      10/1   3           F2 XX XX        If Sign = 0 (positive)
-JP Z,NN      10/1   3           CA XX XX        If Zero = 1
-JP NZ,NN     10/1   3           C2 XX XX        If Zero = 0
-JP PE,NN     10/1   3           EA XX XX        If Parity = 1 (even)
-JP PO,NN     10/1   3           E2 XX XX        If Parity = 0 (odd)
+JP C,NN     10/10   3           DA XX XX        If Carry = 1
+JP NC,NN    10/10   3           D2 XX XX        If Carry = 0
+JP M,NN     10/10   3           FA XX XX        If Sign = 1 (negative)
+JP P,NN     10/10   3           F2 XX XX        If Sign = 0 (positive)
+JP Z,NN     10/10   3           CA XX XX        If Zero = 1
+JP NZ,NN    10/10   3           C2 XX XX        If Zero = 0
+JP PE,NN    10/10   3           EA XX XX        If Parity = 1 (even)
+JP PO,NN    10/10   3           E2 XX XX        If Parity = 0 (odd)
 ─────────────────────────────────────────────────────────────────────────────────
 JR $+2         12   2   ------  18 XX           Relative jump; PC = PC+2+offset (-128..+127)
 JR C,$+2     12/7   2           38 XX           If Carry = 1
@@ -293,7 +298,7 @@ LD BC,(NN)     20   4           ED 4B XX XX
 LD DE,NN       10   3           11 XX XX
 LD DE,(NN)     20   4           ED 5B XX XX
 LD HL,NN       10   3           21 XX XX
-LD HL,(NN)     20   3           2A XX XX
+LD HL,(NN)     16   3           2A XX XX        (ED 6B XX XX is an alternative encoding: 20 T, 4 bytes)
 LD SP,NN       10   3           31 XX XX
 LD SP,(NN)     20   4           ED 7B XX XX
 LD SP,HL        6   1           F9
@@ -310,7 +315,7 @@ LD (DE),A       7   1           12
 LD (NN),A      13   3           32 XX XX
 LD (NN),BC     20   4           ED 43 XX XX
 LD (NN),DE     20   4           ED 53 XX XX
-LD (NN),HL     16   3           22 XX XX
+LD (NN),HL     16   3           22 XX XX        (ED 63 XX XX is an alternative encoding: 20 T, 4 bytes)
 LD (NN),SP     20   4           ED 73 XX XX
 LD (NN),IX     20   4           DD 22 XX XX
 LD (NN),IY     20   4           FD 22 XX XX
@@ -320,15 +325,15 @@ LD (IY+N),r    19   3           FD 70+rb XX
 LD (IY+N),N    19   4           FD 36 XX XX
 ─────────────────────────────────────────────────────────────────────────────────
 LDD            16   2   --0*0-  ED A8           (DE)=(HL); HL=HL-1; DE=DE-1; BC=BC-1
-LDDR         21/1   2   --000-  ED B8           LDD until BC=0
+LDDR        21/16   2   --000-  ED B8           LDD until BC=0
 LDI            16   2   --0*0-  ED A0           (DE)=(HL); HL=HL+1; DE=DE+1; BC=BC-1
-LDIR         21/1   2   --000-  ED B0           LDI until BC=0
+LDIR        21/16   2   --000-  ED B0           LDI until BC=0
 ─────────────────────────────────────────────────────────────────────────────────
 NEG             8   2   ***V1*  ED 44           A = 0 - A (two's complement negate)
 ─────────────────────────────────────────────────────────────────────────────────
 NOP             4   1   ------  00              No operation
 ─────────────────────────────────────────────────────────────────────────────────
-OR r            4   1   ***P00  B0+rb           A = A | s
+OR r            4   1   **0P00  B0+rb           A = A | s
 OR N            7   2           F6 XX
 OR (HL)         7   1           B6
 OR (IX+N)      19   3           DD B6 XX
@@ -342,7 +347,11 @@ OUT (C),D      12   2           ED 51
 OUT (C),E      12   2           ED 59
 OUT (C),H      12   2           ED 61
 OUT (C),L      12   2           ED 69
-OUT (C),0      12   2           ED 71           Output 0 to port(BC) (undocumented)
+OUT (C),0      12   2           ED 71           Output 0 to port(BC) (undocumented; NMOS Z80 — CMOS parts output $FF)
+OUTD           16   2   ?*??1-  ED AB           B=B-1; port(BC)=(HL); HL=HL-1
+OTDR        21/16   2   ?1??1-  ED BB           OUTD until B=0
+OUTI           16   2   ?*??1-  ED A3           B=B-1; port(BC)=(HL); HL=HL+1
+OTIR        21/16   2   ?1??1-  ED B3           OUTI until B=0
 ─────────────────────────────────────────────────────────────────────────────────
 POP AF         10   1   ------  F1              qq = (SP); SP = SP + 2
 POP BC         10   1           C1
@@ -412,7 +421,7 @@ SBC A,N         7   2           DE XX
 SBC A,(HL)      7   1           9E
 SBC A,(IX+N)   19   3           DD 9E XX
 SBC A,(IY+N)   19   3           FD 9E XX
-SBC HL,BC      15   2   **?V1*  ED 42           HL = HL - ss - CY
+SBC HL,BC      15   2   ***V1*  ED 42           HL = HL - ss - CY; H = borrow from bit 12
 SBC HL,DE      15   2           ED 52
 SBC HL,HL      15   2           ED 62
 SBC HL,SP      15   2           ED 72
@@ -447,7 +456,7 @@ SUB (HL)        7   1           96
 SUB (IX+N)     19   3           DD 96 XX
 SUB (IY+N)     19   3           FD 96 XX
 ─────────────────────────────────────────────────────────────────────────────────
-XOR r           4   1   ***P00  A8+rb           A = A ^ s
+XOR r           4   1   **0P00  A8+rb           A = A ^ s
 XOR N           7   2           EE XX
 XOR (HL)        7   1           AE
 XOR (IX+N)     19   3           DD AE XX
@@ -495,8 +504,8 @@ LD IXH,N        11   3  DD 26 XX    IXH = immediate byte
 LD IXL,N        11   3  DD 2E XX    IXL = immediate byte
 LD IXH,r         8   2  DD 60+rb    IXH = register (r ≠ H or L)
 LD IXL,r         8   2  DD 68+rb    IXL = register (r ≠ H or L)
-LD r,IXH         8   2  DD 44+rb    register = IXH (r ≠ H or L)
-LD r,IXL         8   2  DD 4C+rb    register = IXL (r ≠ H or L)
+LD r,IXH         8   2  DD 44+8*rb  register = IXH (r ≠ H or L); B=DD 44, C=DD 4C, A=DD 7C
+LD r,IXL         8   2  DD 45+8*rb  register = IXL (r ≠ H or L); B=DD 45, C=DD 4D, A=DD 7D
 LD IXH,IXH       8   2  DD 64       IXH = IXH
 LD IXH,IXL       8   2  DD 65       IXH = IXL
 LD IXL,IXH       8   2  DD 6C       IXL = IXH
@@ -529,14 +538,15 @@ one instruction. `LD IXH,IYH` is not encodable. Also, `LD H,(IX+d)` and
 `LD IXH,(IX+d)` are *not* the same instruction — `DD 66 XX` reads from
 `(IX+d)` into H, not into IXH.
 
-**Practical use on TS 2068:** Since IY is reserved, IYH/IYL are available as
-scratch registers but be cautious — modifying IYH or IYL individually is safe,
-but any code that restores IY as a 16-bit value must restore it to $5C3A.
+**Practical use on TS 2068:** IY is reserved, and changing IYH or IYL changes
+IY: the IM 1 interrupt routine addresses FRAMES2 and the keyboard variables
+through IY (ROM `$0045`). Use IYH/IYL as scratch only with interrupts disabled,
+and restore IY to $5C3A before `EI`. IXH/IXL have no such restriction.
 
 **Speed advantage example:**
 
 ```asm
-; Load DE into IX — official method: 25 T-states, 2 bytes of code
+; Load DE into IX — official method: 25 T-states, 3 bytes of code
 PUSH DE       ; 11 T-states
 POP IX        ; 14 T-states
 
@@ -548,7 +558,7 @@ LD IXL,E      ; 8 T-states  (DD 6B)
 ### SLL (Shift Left Logical, sets bit 0)
 
 `SLL r` (CB 30+rb) shifts left and sets bit 0 to 1 (unlike SLA which clears it).
-Useful for multiplication by 2 with a guaranteed set low bit. Flags: S Z - P 0 C.
+Useful for multiplication by 2 with a guaranteed set low bit. Flags: S Z, H = 0, P, N = 0, C.
 Most assemblers don't recognise the mnemonic; use `.db $CB, $30+rb`.
 
 ### IN (C) / OUT (C),0
@@ -580,12 +590,14 @@ without modifying any other state.
 ### IN r,(C) sets flags; IN A,(N) does not
 
 `IN A,(N)` (DB XX) loads port data into A but sets no flags.
-`IN r,(C)` (ED 4x/78) loads port data into a register AND sets S, Z, H, P, N flags
-based on the value read. Useful for testing port state without a separate CP or AND.
+`IN r,(C)` (ED 4x/78) loads port data into a register AND sets S, Z and P/V (parity)
+from the value read, resetting H and N; C is unaffected. Useful for testing port state without a separate CP or AND.
 
 ### RETN and RETI are functionally identical
 
-Both restore IFF1 from IFF2 and pop the return address from the stack.
+Both pop the return address from the stack. Zilog documents IFF1 ← IFF2 only
+for RETN; that RETI does the same on real silicon is widely reported but
+**(unverified)** here.
 The distinction matters only to Z80-compatible interrupt controller chips that
 watch the data bus for the RETI opcode (ED 4D) during M1 fetch cycles.
 On the TS 2068 there are no such external devices, so RETN and RETI behave
@@ -615,8 +627,8 @@ in the mnemonic are a Zilog convention inconsistency. Same applies to
 
 ### JR vs JP — when to use which
 
-`JR` (2 bytes, signed 8-bit offset) is smaller but limited to ±127 bytes from
-the instruction following the JR. It is also 3 T-states faster than JP when
+`JR` (2 bytes, signed 8-bit offset) is smaller but limited to −128…+127 bytes
+from the instruction following the JR (−126…+129 from the JR itself). It is also 3 T-states faster than JP when
 the branch is *not* taken. Use `JP` when the target may be far, or when you
 need conditions beyond NZ/Z/NC/C (JR only supports those four).
 
@@ -631,7 +643,7 @@ For TS 2068 I/O ports, use the correct form:
 - `OUT ($FE),A` — border / speaker / MIC (standard ULA port, high byte = A)
 - `OUT (C),A` with BC = $xxFF — DECR register at port $FF
 - `OUT (C),A` with BC = $xxF4 — HSR (horizontal select) at port $F4
-- `OUT (C),A` with BC = $xxF5 / $F6 — AY-3-8910 register/data
+- `OUT (C),A` with BC = $xxF5 / $F6 — AY-3-8912 register/data
 
 ---
 
@@ -660,7 +672,7 @@ For TS 2068 I/O ports, use the correct form:
 | F | 8-bit | Flags (S Z - H - P/V N C); not directly addressable |
 | B, C, D, E, H, L | 8-bit | General purpose |
 | BC, DE, HL | 16-bit | Register pairs; HL is the default pointer |
-| AF, BC, DE, HL | 16-bit | Alternate set (exchanged with EXX / EX AF,AF') |
+| AF', BC', DE', HL' | 16-bit | Alternate set (exchanged with EXX / EX AF,AF') |
 | IX, IY | 16-bit | Index registers; **IY reserved on TS 2068** |
 | SP | 16-bit | Stack pointer; grows downward |
 | PC | 16-bit | Program counter; not directly accessible |

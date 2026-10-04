@@ -221,32 +221,40 @@ function token values.
 
 ---
 
-## AY-3-8910 Sound Chip Register Map
+## AY-3-8912 Sound Chip Register Map
 
-The `SOUND` command writes register/value pairs to the AY-3-8910 via ports `$F5`
-(register address) and `$F6` (data). Registers 1–16 are valid (`$01–$10`);
-register 0 is invalid and causes Report C.
+The TS2068 fits the AY-3-8912, which has a single I/O port (A); there are no
+port-B pins (technical manual §2.1.6, "GI 8912"; Figure 2.1.7-1). The `SOUND`
+command writes register/value pairs to it via ports `$F5` (register address)
+and `$F6` (data). The register number is written to `$F5` unchanged.
 
-| Reg | Name | Description |
-|-----|------|-------------|
-| 1 | `$01` | Channel A tone period low byte |
-| 2 | `$02` | Channel A tone period high nibble (bits 3-0) |
-| 3 | `$03` | Channel B tone period low byte |
-| 4 | `$04` | Channel B tone period high nibble |
-| 5 | `$05` | Channel C tone period low byte |
-| 6 | `$06` | Channel C tone period high nibble |
-| 7 | `$07` | Noise period (bits 4-0) |
-| 8 | `$08` | Mixer control / I/O enable |
-| 9 | `$09` | Channel A amplitude (bit 4 = envelope mode) |
-| 10 | `$0A` | Channel B amplitude |
-| 11 | `$0B` | Channel C amplitude |
-| 12 | `$0C` | Envelope period low byte |
-| 13 | `$0D` | Envelope period high byte |
-| 14 | `$0E` | Envelope shape / cycle |
-| 15 | `$0F` | I/O port A data (joystick 1 when reg 8 sets port A output) |
-| 16 | `$10` | I/O port B data (joystick 2) |
+`SOUND` accepts register numbers **0–16** (`$00–$10`): it rejects only
+A ≥ `$11` with Report C (ROM `$2137`: `CP $11` / `JP NC,$1BED`; the following
+`DEC A` / `INC A` / `JP M` test cannot fire for 0–16). The chip's registers are
+R0–R15; the ROM itself uses R7 for the mixer (`$0EC8`: `LD A,$07` / `OUT ($F5),A`)
+and R14 for the joysticks (`$290E`). What `SOUND 16,n` does on the chip is
+**(unverified)** — there is no register 16.
 
-### Register 8 — Mixer Control
+| Reg | Hex | Description |
+|-----|-----|-------------|
+| 0 | `$00` | Channel A tone period low byte |
+| 1 | `$01` | Channel A tone period high nibble (bits 3-0) |
+| 2 | `$02` | Channel B tone period low byte |
+| 3 | `$03` | Channel B tone period high nibble |
+| 4 | `$04` | Channel C tone period low byte |
+| 5 | `$05` | Channel C tone period high nibble |
+| 6 | `$06` | Noise period (bits 4-0) |
+| 7 | `$07` | Mixer control / I/O enable |
+| 8 | `$08` | Channel A amplitude (bit 4 = envelope mode) |
+| 9 | `$09` | Channel B amplitude |
+| 10 | `$0A` | Channel C amplitude |
+| 11 | `$0B` | Envelope period low byte |
+| 12 | `$0C` | Envelope period high byte |
+| 13 | `$0D` | Envelope shape / cycle |
+| 14 | `$0E` | I/O port A data (both joysticks — see STICK below) |
+| 15 | `$0F` | I/O port B data — no pins on the AY-3-8912 |
+
+### Register 7 — Mixer Control
 
 | Bit | Function |
 |-----|----------|
@@ -256,27 +264,43 @@ register 0 is invalid and causes Report C.
 | 3 | 0 = Channel A noise enabled |
 | 4 | 0 = Channel B noise enabled |
 | 5 | 0 = Channel C noise enabled |
-| 6 | 1 = I/O port A is output |
-| 7 | 1 = I/O port B is output |
+| 6 | 1 = I/O port A is output (must be 0 to read the joysticks — technical manual §2.1.6.1) |
+| 7 | 1 = I/O port B is output (no port-B pins on the AY-3-8912) |
 
 ### Reading Joysticks via STICK
 
-`STICK` reads a joystick by reading AY register 14 (`$0E`) via port `$F6`.
+`STICK` selects AY register 14 (`$0E`) via port `$F5`, then reads it with
+`IN A,(C)`, C = `$F6`. Both joysticks share the same bits of R14; **which stick
+is read is chosen by the high address byte in B** (B = 1 → A8 → left/player 1,
+B = 2 → A9 → right/player 2). ROM `$2902`–`$2929`.
 
 ```
-STICK(joystick, direction):
-  joystick  = 1 or 2
-  direction = 1 or 2
+STICK (what, stick):
+  what  = 1 → direction bits (0–15)
+          2 → fire button (0 or 1)
+  stick = 1 (left) or 2 (right)
+  Any other value for either argument → Report A (ROM $292B/$2932)
 
-BASIC: LET j = STICK 1,1
+BASIC: LET j = STICK (1,1)
 ```
 
-Raw joystick bits (AY register 14, complemented, masked):
+The parentheses are required: `$287B` rejects anything but `(`expr`,`expr`)`
+with Report C.
+
+Argument order from the code: GET_XY (`$2660`) pops the second argument into B
+and the first into C; B (the stick number) is still in B at the `IN A,(C)`,
+and the first argument drives the `DJNZ` at `$2918`.
+
+Raw R14 bits (active low; the ROM complements with `CPL`):
 
 ```
-Bits 3-0: Joystick 1 directions (inverted: 0 = active)
-Bits 7-4: Joystick 2 directions (inverted: 0 = active)
+Bit 0: up      Bit 1: down     Bit 2: left     Bit 3: right
+Bits 4-6: unused (read 1)      Bit 7: fire
 ```
+
+`STICK (1,n)` returns the complemented bits 3-0 (`AND $0F`), except that the
+value 15 (all four pressed) is returned as 0. `STICK (2,n)` returns bit 7
+(`RLCA` / `AND $01`).
 
 ---
 

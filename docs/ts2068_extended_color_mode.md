@@ -22,8 +22,10 @@ The practical consequence: ECM largely eliminates the attribute clash that const
 Spectrum-family graphics, because color can change on every pixel row rather than every
 eighth one.
 
-> The reference note in `ts2068_video_and_cartridges.md` describing this as "one attribute
-> byte per pixel pair" is imprecise — that would require 24,576 bytes. It is 8×1.
+> An earlier revision of `ts2068_video_and_cartridges.md` described this as "one attribute
+> byte per pixel pair", which would require 24,576 bytes. It is 8×1 (Technical Manual
+> Table 3.2.2-1: "6144 Attribute Bytes, each one controlling 8X1 pixels"); that file is
+> now corrected.
 
 ## Memory layout
 
@@ -72,9 +74,9 @@ Go through the ROM's `CHNG_VID` at **EXROM `$0E8E`**, which does the relocation 
 
 | Step | Address | Action |
 |---|---|---|
-| 1 | `$0E9D`–`$0EB2` | Check `STKEND + $1B00 ≤ RAMTOP`; if not, jump to error exit `$0F3A` and **do not enter ECM** |
-| 2 | `$0EC5` | `CALL $65D0` — RAM dispatcher helper, updates `PROG`/`VARS`/`STKEND` |
-| 3 | `$0ECC` | `LDDR` — moves the BASIC area up, out of `$6000`–`$7BFF` |
+| 1 | `$0E9D`–`$0EB2` | Check `STKEND + $12C0 + $0840 < RAMTOP`; if not, jump to error exit `$0F3A` and **do not enter ECM** |
+| 2 | `$0EC5` | `CALL $65D0` — RAM `CALL_BANK` to HOME `REMGSZ` ($12CA) with fence `$683F`, `BC` = `$12C0`: adds `$12C0` to `CHANS`, `PROG`, `VARS` … `STKEND` |
+| 3 | `$0ECC` | `LDDR` — moves `$6840`…`STKEND` up `$12C0` bytes, out of `$6000`–`$7AFF`: `CHANS` → `$7B00`, `PROG` → `$7B16` |
 | 4 | `$0ED0` | `CALL $0DB0` (OPEN-DFILE) — moves dispatcher + stack `$6000` → `$F7C0`, clears `$6000`–`$7AFF` |
 | 5 | `$0ED3`–`$0EEB` | `ERRSP`, `LISTSP`, `MSTBOT` += `$97C0` |
 | 6 | — | Set `VIDMOD`; set DECR preserving bit 7 |
@@ -119,7 +121,8 @@ Interrupts are enabled across the `CALL` because `CHNG_VID` manages `DI`/`EI` in
 |---|---|---|
 | Dispatcher entry | `$6200` | **`$F9C0`** |
 | Dispatcher + stack | `$6000`–`$683F` | **`$F7C0`–`$FFFF`** |
-| `PROG` | `$6856` | relocated up by `$1B00`, into chunk 4 |
+| `PROG` | `$6856` | `$7B16` — relocated up by `$12C0`, still in chunk 3 |
+| `UDG` | `$FF58` | `$F718` — moved down `$0840` |
 | Attribute source | `$5800`–`$5AFF` | `$6000`–`$77FF` |
 
 Three rules follow:
@@ -156,10 +159,13 @@ a uniform fill at startup is usually enough:
 Because attributes are per-pixel-row, individual text lines can be recolored cheaply —
 useful for highlighting a selected menu entry.
 
-### 2. CLOSE-DFILE is broken
+### 2. CLOSE-DFILE is reported broken (unverified)
 
-`ts2068_errata_and_notes.md` documents this: once the second display file is opened it
-cannot be reliably closed. The recommended approach is to not close it at all.
+`ts2068_errata_and_notes.md` records the long-standing report that once the second
+display file is opened it cannot be reliably closed. That report is **(unverified)**:
+the stock CLOSE-DFILE code mirrors OPEN-DFILE and no failure mechanism has been found.
+The verified defect is the relocation fix table, which misses four operands on the BEU
+paths. The cautious approach is still not to close it.
 
 Options, cheapest first:
 
@@ -170,10 +176,12 @@ Options, cheapest first:
 
 Do not assume repeated round trips between ECM and standard mode will work.
 
-### 3. DECR is write-only
+### 3. Preserve DECR bit 7
 
-Bit 7 must be preserved across writes. The OS keeps a RAM copy of the register; do the
-same rather than trying to read it back.
+Bit 7 must be preserved across writes. The stock ROMs keep no RAM copy of DECR; they read
+the port back and merge the mode in — `IN A,($FF) / AND $80 / OR mode / OUT ($FF),A`
+(EXROM OPEN-DFILE `$0E1B`, CHNG_VID `$0EF4`) — exactly as the ECMViewer sequence above
+does with `IN A,($FF) / SET 7,A`.
 
 ## Loading ECM images
 

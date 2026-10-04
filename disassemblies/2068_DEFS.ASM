@@ -266,11 +266,11 @@ DEFC VIDMOD = $5CC2 ;video mode
 DEFC ARSBUF = $5CC4 ;pointer to AROS buffer
 DEFC ARSFLG = $5CC6 ;AROS flag
 ; bit 7 set indicates AROS present
-; bit 4 set indicates NXTLIN pointing to AROS
-; bit 3 set indicates DATADD pointing to AROS
+; bit 4 set indicates NXTLIN pointing to AROS [corrected: (unverified) - no stock HOME/EXROM code tests this bit]
+; bit 3 set indicates DATADD pointing to AROS [corrected: (unverified) - no stock HOME/EXROM code tests this bit]
 DEFC ADATLN = $5CC7 ;pointer to the start of the current data line (AROS only)
-DEFC DTLNLN = $5CC8 ;length of the current data line (AROS only)
-DEFC STRMN = $5CCB ;current stream number used for bus expansion unit devices
+DEFC DTLNLN = $5CC8 ;length of the current data line (AROS only) [corrected: the ROM keeps the length at $5CC9-$5CCA (DTLNLN+1: HOME $1DE0, $1DEA, $1E04, $1E13, $1E45); $5CC8 is the high byte of ADATLN]
+DEFC STRMN = $5CCB ;current stream number used for bus expansion unit devices [corrected: written whenever BASIC names a stream (#n at HOME $221E, OPEN #/CLOSE # at $1412), not only for BEU devices; read when a bank channel's routine is called ($1215, $13F1, $14A3)]
 
 ;IY offsets
 ;DEFC OERRNR = $00 ;ERRNR
@@ -289,7 +289,7 @@ DEFC STRMN = $5CCB ;current stream number used for bus expansion unit devices
 ;DEFC OOSPCC = $36
 ;DEFC OFLAGX = $37
 ;DEFC OSTRLEN = $38
-;DEFC OFRAMES = $40 ;FRAMES
+;DEFC OFRAMES = $40 ;FRAMES [corrected: IY+$40 is FRAMES2 ($5C7A); FRAMES ($5C78) is IY+$3E]
 ;DEFC OPPOSN = $45
 ;DEFC OPRCC = $46
 ;DEFC OSPOSNLIN = $4F

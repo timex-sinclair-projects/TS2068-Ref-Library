@@ -34,8 +34,11 @@ Provenance: `TS2068_ROMS_NoMod.zip` unpacks to `TS2068_U16.BIN` + `TS2068_U20.BI
   `© 1983 Timex Computer Corp` and `RST $38` at `$0017` — both match
   `TS2068_U16.BIN`, not `2068Home.BIN` (whose copyright string is replaced with
   `T/S 2068 Computer  The Superior Machine.  (W.J.)` and whose `$0017` is `$BF`).
-- `disassemblies/ts2068_exrom_U20_stock.txt` has `JR NZ` in the NMI handler and
-  `GET_WORD: PUSH AF` — both match `TS2068_U20.BIN`, not `2068Exrom.BIN`.
+- `disassemblies/ts2068_exrom_U20_stock.txt` has `JR NZ` in the NMI handler
+  (`$20` at `$110E`; `2068Exrom.BIN` has `$28`) and `PUSH AF` as the first
+  instruction after PUT_WORD's `CALL` (`$F5` at `$1140`; `2068Exrom.BIN` has
+  `PUSH DE`, `$D5`) — both match `TS2068_U20.BIN`. (GET_WORD's own `PUSH AF` at
+  `$1116` is `$F5` in both images, so it does not tell them apart.)
 
 What the modified images change:
 
@@ -124,6 +127,16 @@ Installed at `~/z88dk/z88dk/`. Environment variables in `~/.zshrc`:
 | `zebra_os64_analysis.md` | Byte-level analysis of the Zebra OS-64 cartridge ROM |
 | `Timex Sinclair 2068 Technical Manual (best).pdf` | The Technical Reference Manual, 401 pages. **Not a scan** — born-digital (Word → PostScript → Ghostscript, 2016), so the text layer is real text. See the caveats in `technical-manual/README.md` before trusting it |
 | `technical-manual/` | The narrative half of that manual (pages 1–104) as markdown chapters, with page-render figures. Start at `technical-manual/README.md` |
+| `dreger-machine-code/` | Dr. Lloyd Dreger, *Introduction to 2068 Machine Code* (1986): a corrected, ROM-checked transcription in 14 chapter files. **Secondary source** — every claim checked against the stock ROMs; corrections and caveats are in the footnotes ("Corrected against the ROM.", "Library note:", "(unverified)"). Start at `dreger-machine-code/README.md`. Not GPL — see its `NOTICE.md` |
+
+**`docs/dreger-machine-code/`** is a 1986 tutorial, not a reference. It is useful
+for its worked explanations of the 5-byte number format, the RST 28h calculator,
+the attribute masks, the AY chip and the function dispatcher, but where it and
+the docs above differ, **the docs and the ROM win**. Read the footnote before
+relying on any passage that carries one: a "Library note" means Dreger's wording
+was kept although the ROM contradicts it. The original text is © 1986 Dreger
+(orphan work, included for preservation); only the transcription and notes are
+CC0 — see `dreger-machine-code/NOTICE.md`.
 
 `docs/` is prose reference only. The ROM listings and the symbol file live in
 `disassemblies/`.
@@ -179,15 +192,21 @@ The four PDFs are the TPI protocol, filesystem and BASIC-extension specs.
 ## Key TS2068 Facts
 
 - **CPU:** Z80A at 3.528 MHz
-- **Frame rate:** 60 Hz — 3,528,000 / 60 = **58,800 T-states/frame**
+- **Frame rate:** 60.11 Hz — 262 lines × 224 T-states = **58,688 T-states/frame**
+  (Technical Manual §2.1.8.3: 14.112 MHz ÷ 896 per line, 262 lines, 60.1145 Hz;
+  the CPU clock is 14.112 MHz ÷ 4, so 896 ÷ 4 = 224 T per line). The often-quoted
+  58,800 is just 3,528,000 ÷ 60.
 - **IY register:** Always $5C3A (points to ERR_NR) — never modify. All
   `(IY+n)` offsets in the ROM are relative to this.
 - **Memory:** eight 8K chunks. Chunks 0–1 HOME ROM ($0000–$3FFF); chunk 2
-  display file + system variables ($4000–$5FFF); chunk 3 dispatcher, machine
-  stack, channels and the start of the BASIC program ($6000–$7FFF); chunks 4–7
-  RAM ($8000–$FFFF). Default RAMTOP $E100.
+  display file + system variables ($4000–$5FFF); chunk 3 machine stack
+  ($6000–$61FF), dispatcher code ($6200–$682F), channels ($6840) and the start
+  of the BASIC program ($6856); chunks 4–7 RAM ($8000–$FFFF), with the UDGs at
+  the very top. Power-on RAMTOP is **$FF57** (65367): INIT copies the 168 UDG
+  bytes to the top of RAM ($FF58–$FFFF) and sets RAMTOP = UDG − 1 (HOME
+  $0D69–$0D7F); NEW keeps the existing RAMTOP.
 - **$0013:** several documents in this repo call this a "ROM version byte"
-  ($FF = v1), sourced from Timex documentation. The disassembly shows no such
+  ($FF = v1), sourced from Timex documentation (Technical Manual §3.1). The disassembly shows no such
   label — `$0013` sits in the five `RST $38` filler bytes between `WRCH`
   ($0010: `JP $11ED`) and `GETCURCH` ($0018). The version reading is plausible
   but **(unverified)** here, and it is `$FF` in both HOME ROM images, so it is
@@ -199,18 +218,27 @@ The four PDFs are the TPI protocol, filesystem and BASIC-extension specs.
 |------|-----------|---------|
 | $FE | W | Border color (bits 2–0), MIC (bit 3), speaker (bit 4) |
 | $FE | R | Keyboard half-row (bits 4–0, active low), EAR (bit 6) |
-| $FF | W | DECR — video mode, paper color, KB interrupt disable, EXROM select |
-| $F4 | W | HSR — chunk selection (bit N=0 HOME, bit N=1 DOCK/EXROM) |
+| $FF | R/W | DECR — video mode, 64-column ink/paper, interrupt inhibit, EXROM select |
+| $F4 | R/W | HSR — chunk selection (bit N=0 HOME, bit N=1 DOCK/EXROM) |
 | $F5 | W | AY-3-8912 register select |
 | $F6 | W | AY-3-8912 data write |
 | $F6 | R | AY-3-8912 data read (joystick via register 14) |
-| $FB | R | Printer BUSY (bit 0) |
-| $A0, $40, $80, $C0, $FC, $FD | W/R | Bus Expansion Unit ports — the BEU was never produced; see `ts2068_memory_map.md` |
+| $FB | R/W | Printer — ZX Printer protocol: read bit 0 encoder, bit 6 = 1 no printer, bit 7 stylus; write bit 1 slow, bit 2 motor stop, bit 7 stylus (HOME $0A4A–$0A7A) |
+| $FC, $FD | — | Reserved for bank switching, "not implemented" (Technical Manual Table 2.1.13-1); the stock ROMs never address them |
 
-**DECR (port $FF, write-only)** — bits 3–5 select the ink/paper colour for
-64-column mode; bit 6 inhibits the 17 ms interrupt (**0 enables** it); bit 7
-enables the EXROM. Bit 7 must be preserved; the OS keeps a RAM copy and so
-should your code.
+The Bus Expansion Unit registers ($40, $80, $A0, $C0) are **not I/O ports**:
+they are the high bytes of memory addresses. EXROM `WRITE_BS_REG` does
+`LD H,D / LD L,0 / LD (HL),A`, strobing through AY port A and the nybble-steering
+location $C000. The BEU was never produced; see `ts2068_memory_map.md`.
+
+**DECR (port $FF)** — bits 3–5 select the 64-column ink (paper is the
+complement); bit 6 inhibits the 17 ms interrupt (**0 enables** it); bit 7
+selects the EXROM (1) or DOCK (0) for chunks whose HSR bit is set; INIT leaves
+it clear (HOME $0DD1, $0E20). Bit 7 must be preserved. The stock ROMs keep no
+RAM copy: they read the port back and rewrite it — `IN A,($FF) / AND $80 /
+OR mode / OUT ($FF),A` (EXROM OPEN-DFILE $0E1B; the HOME init copier does
+`IN A,($FF) / SET 7,A` at $0E0F). The EXROM bank-switching code reads the HSR
+(port $F4) back the same way.
 
 **D2-D0 is a 3-bit video mode field, not three independent flags:** `000`
 standard ($00), `001` dual-file ($01), `010` hi-colour ($02), `110` 64-column
@@ -221,11 +249,15 @@ the Zebra OS-64 ROM, which does `LD C,$06 / ADD A,C / OUT ($FF),A` and calls
 ### Display File
 
 - **Primary:** pixels $4000–$57FF, attributes $5800–$5AFF (256×192, 32×24 attrs)
-- **Secondary (VIDMOD $5CC2 ≠ 0):** pixels $6000–$79FF, attributes $7A00–$7BFF
-- Opening the second display file overwrites chunk 3, so OPEN-DFILE relocates
-  the UDGs, the machine stack and the dispatcher into chunk 7:
-  dispatcher **code** to $F7C0–$F9BF, dispatcher **entry point** and stack base
-  to **$F9C0**.
+- **Secondary (VIDMOD $5CC2 ≠ 0):** pixels $6000–$77FF, attributes $7800–$7AFF
+  — the primary layout plus $2000. OPEN-DFILE clears exactly $6000–$7AFF
+  (EXROM $0E0B–$0E14).
+- Opening the second display file overwrites chunk 3, so OPEN-DFILE moves the
+  UDGs **down** $0840 bytes (to $F718 from the power-on $FF58) and copies the
+  whole $6000–$683F block (stack + dispatcher) to $F7C0–$FFFF, i.e. +$97C0:
+  machine stack $F7C0–$F9BF, dispatcher code $F9C0–$FFEF, dispatcher
+  **entry point** and stack base (MSTBOT) **$F9C0**. CHNG_VID also opens
+  $12C0 bytes at $6840 first, so CHANS moves to $7B00 and PROG to $7B16.
 
 ### Dispatcher (Preferred API)
 
@@ -249,9 +281,15 @@ must be reached with `CALL`:
     PUSH DE              ; SVC_CODE
     LD   A,(VIDMOD)
     OR   A
-    CALL Z,$6200
-    ...
+    JR   NZ,hi
+    CALL $6200           ; VIDMOD = 0
+    JR   done
+hi: CALL $F9C0           ; VIDMOD <> 0 (dispatcher relocated)
+done:
 ```
+
+(Not `CALL Z,$6200` followed by `CALL NZ,$F9C0`: the second test would see the
+flags the service returned.)
 
 Sample services: LOAD $05, MERGE $06, SAVE $07, PARP (tone) $1A, BEEP $1B,
 SENDTV $1D, CLS $22, SELECT (stream) $29, INSERT $2A, FIND_L $35, CHK_SZ $4A,
@@ -259,7 +297,9 @@ PLOT $58, WRCH $87, K_CLS $8D. Full table in `docs/ts2068_dispatcher.md`.
 
 ### Spectrum Compatibility Notes
 
-- RST vectors $00–$38 are identical
+- RST vectors $00–$38 are at the same addresses with the same code shape, but
+  several jump targets differ ($0005 `JP $0D31`, $0010 `JP $11ED`, $0028
+  `JP $371A`, $0035 `JP $132D`, $004A `CALL $02E1`)
 - System variables $5C00–$5CB5 are identical
 - Tape routines moved to EXROM — use the dispatcher, not direct ROM calls
 - **BASIC tokens $A5–$FF are identical to the Spectrum's — nothing is shifted.**
@@ -271,7 +311,8 @@ PLOT $58, WRCH $87, K_CLS $8D. Full table in `docs/ts2068_dispatcher.md`.
   $7B ON ERR, $7C STICK, $7D SOUND, $7E FREE, $7F RESET. $90–$A4 is the UDG
   character range, not tokens.
 - FRAMES counter increments at 60 Hz (not 50 Hz)
-- Character set at $3D00 is identical to the Spectrum's, at the same address
+- Character set is at $3D00, the same address as the Spectrum's; byte-identity
+  is **(unverified)** (no Spectrum ROM image in this library)
 - Most ROM *subroutine* addresses differ, so Spectrum code that calls the ROM
   directly will not run
 
@@ -295,9 +336,12 @@ PLOT $58, WRCH $87, K_CLS $8D. Full table in `docs/ts2068_dispatcher.md`.
   ROM listing above is the authority.) Fixing it means changing `$20` to `$28`
   at $006D — which is what both `2068Home.BIN` and the Zebra OS-64 ROM do.
 
-- **CLOSE-DFILE (EXROM $0E27):** cannot reliably close the second display file.
-  Avoid opening it unless it can stay open for the life of the program, or
-  write your own relocation code modelled on OPEN-DFILE.
+- **CLOSE-DFILE (EXROM $0E27):** widely reported as unable to reliably close the
+  second display file **(unverified)** — read in isolation the stock code mirrors
+  OPEN-DFILE and no failure mechanism has been found. The verified defect in this
+  mechanism is the relocation fix table, which misses four operands (EXROM $1D00;
+  see `ts2068_errata_and_notes.md`). Prudent practice is still to leave the second
+  display file open for the life of the program.
 
 - **BEU bank-switching services ($0E–$13):** written for hardware that was never
   produced and never tested against it. `exrom_revision_analysis.md` documents

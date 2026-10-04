@@ -13,7 +13,7 @@ $0020  RST 20 — NEXT-CHAR: advance CH_ADD, fetch → A
 $0028  RST 28 — enter floating point calculator
 $0030  RST 30 — create BC workspace bytes
 $0038  RST 38 — maskable interrupt (clock + keyboard)
-$0013  ROM version byte ($FF = v1)
+$0013  "ROM version byte" ($FF = v1) — (unverified); see CLAUDE.md
 
 $3D00  Character set (CHRSET) — 96 chars × 8 bytes
 
@@ -33,10 +33,12 @@ $5CBC  SYSCON pointer ($5EEA default)
 $5CC2  VIDMOD (0=normal, non-0=2nd display active)
 $5EEA  SYSCON table
 
-$6000  Function dispatcher code (VIDMOD=0)
-$6200  Dispatcher entry point (VIDMOD=0)  ← CALL HERE
-$F7C0  Function dispatcher code (VIDMOD≠0)
-$F9C0  Dispatcher entry point (VIDMOD≠0)  ← CALL HERE
+$6000  Machine stack area $6000–$61FF (VIDMOD=0)
+$6200  Dispatcher entry point + code $6200–$682F (VIDMOD=0)  ← CALL HERE
+$6840  CHANS;  $6856 PROG (power-on)
+$F7C0  Machine stack area $F7C0–$F9BF (VIDMOD≠0)
+$F9C0  Dispatcher entry point + code $F9C0–$FFEF (VIDMOD≠0)  ← CALL HERE
+$FF58  UDG (power-on);  RAMTOP = $FF57
 ```
 
 ---
@@ -52,14 +54,22 @@ $F9C0  Dispatcher entry point (VIDMOD≠0)  ← CALL HERE
     PUSH DE
     LD   A, (VIDMOD)
     OR   A
-    JP   Z,  $6200
-    JP   $F9C0
+    JR   NZ, hi
+    CALL $6200
+    JR   done
+hi: CALL $F9C0
+done:
 
-; Call service with JP (no return) — only push SVC | $8000
+; Jump form (bit 15 set): push only SVC | $8000, still enter with CALL —
+; the service then returns straight to the instruction after the CALL
     LD   DE, SVC | $8000
     PUSH DE
-    JP   $6200       ; (or $F9C0)
+    CALL $6200       ; (or $F9C0 when VIDMOD <> 0)
 ```
+
+Never enter the dispatcher with `JP`: it does `LD IX,0 / ADD IX,SP` and takes
+the return address from `(IX+0)` and SVC_CODE from `(IX+2)` on both the call and
+the jump path (EXROM $1000, D_SAVE). See `ts2068_dispatcher.md`.
 
 ---
 
@@ -88,8 +98,8 @@ $6E  FP2BC    pop calc stack float → BC
 ```
 $FE  W  Border: bits 2-0=color, 3=MIC, 4=speaker
 $FE  R  Keyboard: bits 4-0=row (0=pressed); B=row select
-$FF  W  DECR: bit 0=2nd display, 2=64col, 7=EXROM
-$F4  W  HSR: bit N=0→chunk N from HOME, 1→from DOCK
+$FF  RW DECR: bits 2-0 mode (000/001/010/110), 5-3 64-col ink, 6=int inhibit, 7=EXROM
+$F4  RW HSR: bit N=0→chunk N from HOME, 1→from DOCK/EXROM
 $F5  W  AY register select (SOUND)
 $F6  W  AY data write / R = AY data read
 ```
@@ -105,8 +115,13 @@ $00  (000) Standard (Spectrum-compatible)
 $01  (001) Second display file enabled
 $02  (010) Ultra-high-resolution color
 $06  (110) 64-column mode        <-- $06, NOT $04
-$80  EXROM enabled (keep this set during normal operation)
+$80  Bit 7: EXROM (1) or DOCK (0) for chunks whose HSR bit is 1
 ```
+
+Bit 7 is **clear** in normal operation: HOME INIT writes $00 to port $FF
+($0DD1), and the dispatcher copier sets bit 7 only around its LDIR, then does
+`RES 7,A / OUT ($FF),A` ($0E20). Whatever you write, preserve the bit you found
+— the ROM itself does `IN A,($FF) / AND $80 / OR mode / OUT ($FF),A`.
 
 Combine the mode field with bit 7 by OR: e.g. $81 = EXROM + second display file,
 $86 = EXROM + 64-column. Verified against the Technical Manual §2.1.13.1
@@ -183,8 +198,9 @@ MSTBOT $5CC0  Machine stack base
 ```
 IY+$00  ERR_NR    IY+$01  FLAGS     IY+$02  TVFLAG
 IY+$07  MODE      IY+$0E  BORDCR    IY+$2D  BREG
-IY+$30  FLAGS2    IY+$37  FLAGX     IY+$40  FRAMES
-IY+$52  SCRCT     IY+$57  PFLAG     IY+$7C  ERRLN
+IY+$30  FLAGS2    IY+$37  FLAGX     IY+$3E  FRAMES
+IY+$40  FRAMES2   IY+$52  SCRCT     IY+$57  PFLAG
+IY+$7C  ERRLN
 ```
 
 ---

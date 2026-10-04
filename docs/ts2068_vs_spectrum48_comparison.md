@@ -11,14 +11,13 @@ disassembly notes in this project.
 
 | Area | Spectrum 48K | TS 2068 | Notes |
 |------|-------------|---------|-------|
-| RST vectors $0000–$007F | — | Identical | Byte-for-byte the same |
+| RST vectors $0000–$007F | — | Same entry addresses | Same code shape, but jump targets differ: $0005 `JP $0D31`, $0010 `JP $11ED`, $0028 `JP $371A`, $0035 `JP $132D`, $004A `CALL $02E1`, $005C `JP $1354`; SKIP-OVER also passes $0C, moving SKIPS to $0093 |
 | Token table location | $0095 | $0098 | Slightly offset |
-| Function tokens $86–$A5 | — | **Identical** | RND through BIN — same byte values on both |
-| Command tokens $A6–$E0 (Spec) / $C5–$FF (TS2068) | | Offset +$1F | TS2068 commands are $1F higher due to 5 inserted tokens |
-| TS 2068-only tokens | none | $C0–$C4 | DELETE, ON ERR, STICK, SOUND, FREE (inserted before OR) |
-| Token range $A6–$BF | none | unknown | Not documented in project files; needs verification |
+| Function tokens $A5–$C4 | — | **Identical** | RND through BIN — same byte values on both |
+| Command tokens $C5–$FF | — | **Identical** | OR through COPY — same byte values on both |
+| TS 2068-only keywords | none | $0C, $7B–$7F | DELETE, ON ERR, STICK, SOUND, FREE, RESET — character codes below $A5, not new tokens (see below). ROM token table at $0098: token = $A4 + entry number, $A5 = RND … $FF = COPY, then the six TS 2068 words |
 | Tape routines | HOME ROM | EXROM | Major relocation |
-| Character set | $3D00 | $3D00 | Identical |
+| Character set | $3D00 | $3D00 | Same address; byte-identical **(unverified — no Spectrum ROM image in this library)** |
 | System variables $5C00–$5CB5 | — | Identical | Same names, same addresses |
 | System variables $5CB6+ | — | TS 2068 only | ERRLN, ERRC, ERRS, ERRT, SYSCON, VIDMOD… |
 | NMI bug at $0066 | Present | Present | Same inverted-logic bug in both |
@@ -28,66 +27,70 @@ disassembly notes in this project.
 ## ROM Routine Address Map
 
 The left column is the Spectrum 48K address (from the annotated disassembly).
-The right column is the TS 2068 HOME ROM address (approximate for non-fixed
-entry points). Entries marked **[EXROM]** are in the TS 2068 Extension ROM.
+The right column is the TS 2068 HOME ROM address, checked against the stock ROM
+(`TS2068_U16.BIN`) and its disassembly; the 2068 label is given in parentheses.
+Entries marked **[EXROM]** are in the TS 2068 Extension ROM. An earlier revision
+of this file gave approximate (`~$xxxx`) addresses; most pointed into unrelated
+code and have been replaced.
 
-### Fixed Entry Points (RST Vectors) — IDENTICAL in both machines
+### Fixed Entry Points (RST Vectors) — same addresses in both machines (jump targets differ)
 
 | Addr | Name | Description |
 |------|------|-------------|
-| $0000 | START / RST 0 | Power-on reset. `DI`, XOR A, `LD DE,$FFFF`, `JP START-NEW` |
+| $0000 | START / RST 0 | Power-on reset. `DI`, XOR A, `LD DE,$FFFF`, `JP START-NEW` (2068: `JP $0D31`, INIT) |
 | $0008 | ERROR-1 / RST 8 | Error: `HL←CH_ADD`, `X_PTR←HL`, `JR ERROR-2`. Byte after call = error code−1 |
-| $0010 | PRINT-A-1 / RST 10 | `JP PRINT-A-2` — write char in A to current stream |
-| $0013 | SYS-VERSION | Single byte; Spectrum = $FF; TS 2068 = $FF (v1) |
+| $0010 | PRINT-A-1 / RST 10 | `JP PRINT-A-2` — write char in A to current stream (2068: `JP $11ED`) |
+| $0013 | SYS-VERSION | TS 2068: byte $FF, one of the `RST $38` filler bytes after `JP $11ED`. Technical Manual §3.1 names location $13 the revision identifier ($FF = initial version, later revisions count down); no code in either stock ROM reads it, so the meaning is **(unverified)** beyond the manual. Spectrum: $FF filler, no documented role |
 | $0018 | GET-CHAR / RST 18 | Fetch char at CH_ADD → A |
 | $001C | TEST-CHAR | Test if char is relevant (called by GET-CHAR) |
 | $0020 | NEXT-CHAR / RST 20 | Advance CH_ADD, fetch next char → A |
-| $0028 | FP-CALC / RST 28 | Enter floating-point calculator |
-| $0030 | BC-SPACES / RST 30 | Create BC free bytes in workspace |
-| $0038 | MASK-INT / RST 38 | Maskable interrupt: increment FRAMES, scan keyboard |
-| $0053 | ERROR-2 | Pop return addr, load error code → ERR_NR, restore SP, JP SET-STK |
+| $0028 | FP-CALC / RST 28 | Enter floating-point calculator (2068: `JP $371A`) |
+| $0030 | BC-SPACES / RST 30 | Create BC free bytes in workspace (2068: `JP $132D` at $0035) |
+| $0038 | MASK-INT / RST 38 | Maskable interrupt: increment FRAMES, scan keyboard (2068: `CALL $02E1`) |
+| $0053 | ERROR-2 | Pop return addr, load error code → ERR_NR, restore SP, JP SET-STK (2068: `JP $1354`) |
 | $0055 | ERROR-3 | Load L → ERR_NR, restore SP, JP SET-STK |
 | $0066 | NMI (RESET) | NMI handler — checks NMIADD; **branch logic inverted** in both ROMs |
 | $0074 | CH-ADD+1 | Increment CH_ADD, return char in A |
 | $0077 | TEMP-PTR1 | INC HL, fall through to TEMP-PTR2 |
 | $0078 | TEMP-PTR2 | Store HL → CH_ADD, return char in A |
-| $007D | SKIP-OVER | Skip control codes; return NC if printable char |
-| $0090 | SKIPS | Set carry, update CH_ADD — tail of SKIP-OVER |
+| $007D | SKIP-OVER | Skip control codes; return NC if printable char. The 2068 also returns NC for $0C (DELETE keyword) |
+| $0090 | SKIPS | Set carry, update CH_ADD — tail of SKIP-OVER. **2068: $0093** (shifted by the extra `CP $0C` / `RET Z`) |
 
-### Key Tables — Structure similar but positions differ slightly
+### Key Tables — Same structure, positions differ
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $0095 | TKN-TABLE | ~$0098 | Token keyword text; Spectrum has 32-entry function block starting at $A5, TS 2068 starts at $86 |
-| $0205 | MAIN-KEYS | ~$0227 | 39-key unshifted table (LCKEYS in TS 2068) |
-| $022C | E-UNSHIFT | ~$024E | Unshifted extended mode keys (EKEYS) |
-| $0246 | EXT-SHIFT | ~$0268 | Shifted extended mode keys (SEKEYS) |
-| $0260 | CTL-CODES | ~$0282 | CAPS+digit control codes (NUMFNTBL) |
-| $026A | SYM-CODES | ~$028C | Symbol-shift key codes (KKEYS) |
-| $0284 | E-DIGITS | ~$02A6 | Extended+digit keys (SSKEYS) |
+| $0095 | TKN-TABLE | $0098 (TOKENS) | Token keyword text; function block starts at $A5 on both machines |
+| $0205 | MAIN-KEYS | $0227 | 39-key unshifted table (LCKEYS in TS 2068) |
+| $022C | E-UNSHIFT | $024E | Unshifted extended mode keys (EKEYS) |
+| $0246 | EXT-SHIFT | $0268 | Shifted extended mode keys (SEKEYS) |
+| $0260 | CTL-CODES | $0282 | CAPS+digit control codes (NUMFNTBL) |
+| $026A | SYM-CODES | $028C | Symbol-shift key codes (KKEYS) |
+| $0284 | E-DIGITS | $02A6 | Extended+digit keys (no separate label; continues the KKEYS block) |
 
 ### Keyboard Routines
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $028E | KEY-SCAN | ~$02B0 | Hardware row-scanning loop |
-| $02BF | KEYBOARD | ~$02B5 | Full keyboard scan entry point |
-| $0333 | K-DECODE | ~$0333 | Decode raw reading to character code; address nearly identical |
+| $028E | KEY-SCAN | $02B0 (K_SCAN) | Hardware row-scanning loop |
+| $02BF | KEYBOARD | $02E1 (UPD_K) | Keyboard handler called from MASK-INT ($004A `CALL $02E1`) |
+| $031E | K-TEST | $035C (K_BASE) | Key value → main code |
+| $0333 | K-DECODE | $0371 (CHCODE) | Main code + mode → final character code |
 
 ### Sound / Speaker
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $03B5 | BEEPER | ~$0605 | Low-level tone generator (uses EAR/speaker) |
-| $03F8 | beep | ~$0507 | BEEP command implementation |
+| $03B5 | BEEPER | $03F3 (PARP) | Low-level tone generator; dispatcher service $1A |
+| $03F8 | beep | $0436 (BEEP) | BEEP command implementation; dispatcher service $1B |
 
 ### Tape Routines — MOVED TO EXROM in TS 2068
 
 | Spectrum Addr | Name | TS 2068 Location | Notes |
 |--------------|------|-----------------|-------|
-| $04C2 | SA-BYTES | EXROM ~$006B | Save block of bytes to tape |
-| $0556 | LD-BYTES | EXROM ~$0100 | Load block of bytes from tape |
-| $0605 | SAVE-ETC / LD-ALL | EXROM ~$053F / ~$0605 | Main SAVE/LOAD dispatcher |
+| $04C2 | SA-BYTES | EXROM $0068 (W_TAPE) | Save block of bytes to tape; service $00 |
+| $0556 | LD-BYTES | EXROM $00FC (R_TAPE) | Load block of bytes from tape; service $01 |
+| $0605 | SAVE-ETC | EXROM $01AB (SLVM) | SAVE/LOAD/VERIFY/MERGE command parser; service $04 |
 
 **Critical:** On the TS 2068, never call Spectrum tape routine addresses directly.
 Use the function dispatcher services instead:
@@ -97,59 +100,65 @@ Use the function dispatcher services instead:
 
 ### Screen / Output Routines
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $09F4 | PRINT-OUT | ~$0F2C | Main character output router; handles control codes |
-| $0D6B | CLS | ~$0DAF | Clear entire screen |
-| $0D6E | CLS-LOWER | ~$0A4E | Clear lower screen only |
-| $0E00 | CL-SCROLL | ~$0D6B | Scroll screen up one line |
-| $15F2 | PRINT-A-2 | ~$0DD9 | Write char in A to current stream (actual impl.) |
-| $0BDB | OPEN-CHAN | ~$0BDB | Open channel for I/O (similar position) |
-| $0BA2 | SELECT-S | ~$0BA2 | Select stream by number (similar position) |
+| $09F4 | PRINT-OUT | $0500 (SENDTV) | Output routine of the K, S and P channels (channel data at $11AA); service $1D |
+| $0D6B | CLS | $08A6 (K_CLS) | CLS command: `CALL $08EA`, then clear lower screen; service $8D |
+| $0D6E | CLS-LOWER | $08A9 (CLLHS) | Clear lower screen only; service $21 |
+| $0DAF | CL-ALL | $08EA (CLS) | Clear the whole primary display file; service $22 |
+| $0E00 | CL-SCROLL | $093B (SCRLB) | Scroll B lines up one line; $0939 (SCRL1) does `LD B,$17` first; service $8E |
+| $15F2 | PRINT-A-2 | $11ED (SENDCH) | Write char in A to current stream (RST $10 target); service $86 |
+| $1601 | CHAN-OPEN | $1230 (SELECT) | Select stream A; Error O if closed; service $29 |
 
-Note: PRINT-A-2 moved significantly earlier in the TS 2068 (from $15F2 to ~$0DD9)
-because tape routines were relocated to EXROM, freeing HOME ROM space.
+The 2068 output routines sit lower in the HOME ROM than the Spectrum's
+($11ED vs $15F2) because the tape routines were moved to the EXROM.
 
 ### Initialization and BASIC Main Loop
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $11CB | START-NEW | ~$11CB | Main init; **SAME ADDRESS** in both ROMs |
-| $12A2 | MAIN-EXEC | ~$1B55 | BASIC main execution loop; moved later in TS 2068 |
-| $16C5 | SET-STK | ~$1354 | Reset calculator stack; moved earlier in TS 2068 |
-| $1219 | — | ~$1219 | SET-MIN (TS 2068 only; sets minimum workspace) |
+| $11B7 | NEW | $0D1D (K_NEW) | NEW command: A=$FF, DE=(RAMTOP), falls into INIT; service $26 |
+| $11CB | START-NEW | $0D31 (INIT) | Main init (RST 0 → `JP $0D31`); service $27. $11CB on the 2068 is inside stream data |
+| $1219 | RAM-SET | $0D7F | `LD (RAMTOP),HL`, then CHARS, MSTBOT, SP, CHANS… |
+| $12A2 | MAIN-EXEC | $0E28 | BASIC main loop: DF_SZ←2, auto-list, then $0E2F (MAIN-1), $0E32 (MAIN-2) |
+| $16B0 | SET-MIN | $133F | Clear edit line and workspace, then SET-WORK ($134E) and SET-STK |
+| $16C5 | SET-STK | $1354 (RESET) | Reset calculator stack; service $2B |
 
 ### Memory Management
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $169E | RESERVE | ~$1655 | Allocate workspace bytes |
-| $1655 | MAKE-ROOM | ~$1A29 | Insert BC bytes at HL |
-| $19E5 | RECLAIM-1 | ~$19E5 | Reclaim memory HL–DE; **SAME ADDRESS** |
-| $19E8 | RECLAIM-2 | ~$19E8 | Reclaim BC bytes from DE; **SAME ADDRESS** |
+| $169E | RESERVE | $132D (LCU2) | Allocate workspace bytes (RST $30 → `JP $132D`) |
+| $1652 | ONE-SPACE | $12B8 (INSI) | `LD BC,1`, falls into MAKE-ROOM |
+| $1655 | MAKE-ROOM | $12BB (INSERT) | Insert BC bytes at HL; service $2A |
+| $19E5 | RECLAIM-1 | $174D (DEL_DE) | Reclaim memory HL–DE |
+| $19E8 | RECLAIM-2 | $1750 (DELREC) | Reclaim BC bytes at HL; service $38 |
 
 ### BASIC Interpreter
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $1B17 | LINE-SCAN | ~$1A7A | Scan/execute one BASIC statement |
-| $24FB | SCANNING | ~$28B2 | Evaluate expression; result on calculator stack |
+| $1B17 | LINE-SCAN | $1A27 (SYNTAX) | Syntax-check the edit line; service $3A |
+| $1B8A | LINE-RUN | $1AD8 (EXECUTE) | Run the edit line as a direct command; service $3B |
+| $24FB | SCANNING | $2854 (EXPRN) | Evaluate expression; result on calculator stack; service $5E |
 
 ### Floating-Point Calculator
 
-The calculator entry point (RST $28) is identical. The calculator opcode set is
-identical — see `ts2068_rom_entry_points.md` for the full opcode table.
+The RST $28 entry address is the same; on the 2068 it jumps to $371A. The
+calculator opcode set and its 66-entry address table (2068: $3696) are the same —
+see `ts2068_rom_entry_points.md` for the full opcode table.
 
-| Spectrum Addr | Name | TS 2068 Approx | Notes |
+| Spectrum Addr | Name | TS 2068 Addr | Notes |
 |--------------|------|----------------|-------|
-| $0028 | CALCULATE (RST 28) | $0028 | Entry via RST; **IDENTICAL** |
-| $335B | CALC-ENTRY | ~$335E | Main calculator interpreter loop |
+| $0028 | FP-CALC (RST 28) | $0028 | Entry via RST; jumps to $371A on the 2068 |
+| $335B | CALCULATE | $371A | Calculator interpreter (`$0028: JP $371A`) |
+| $335E | GEN-ENT-1 | $371D | Re-entry with B = opcode (used by the series generator) |
 
 ### Character Set
 
 | Address | Contents | Notes |
 |---------|----------|-------|
-| $3D00 | CHRSET | **IDENTICAL** in both machines — 96 chars × 8 bytes |
+| $3D00 | CHRSET | Same address in both machines — 96 chars × 8 bytes; byte-identity **(unverified)** |
 
 ---
 
@@ -229,7 +238,7 @@ Key reminders:
 
 | Name | Addr | Size | Description |
 |------|------|------|-------------|
-| ERRLN | $5CB6 | 2 | ON ERR target line. Bit 15 set = trapping disabled |
+| ERRLN | $5CB6 | 2 | ON ERR target line. Bit 15 set = trapping armed (`ON ERR GO TO` sets it, `ON ERR RESET` clears it; HOME $0E95, $20B2, $20C9); bit 14 set while a trap is being handled |
 | ERRC | $5CB8 | 2 | Line number where last error occurred |
 | ERRS | $5CBA | 1 | Statement number of last error |
 | ERRT | $5CBB | 1 | Error report code of last error |
@@ -241,8 +250,8 @@ Key reminders:
 | ARSBUF | $5CC4 | 2 | AROS buffer pointer |
 | ARSFLAG | $5CC6 | 1 | AROS status flags |
 | ADATLN | $5CC7 | 2 | AROS current DATA line start |
-| DTLNLN | $5CC8 | 2 | AROS current DATA line length |
-| STRMN | $5CCB | 1 | Current stream number (bus expansion) |
+| DTLNLN | $5CC9 | 2 | AROS current DATA line length. The DEFS file says $5CC8, but the ROM uses $5CC9 (e.g. HOME $1DE0 `LD ($5CC9),BC`) |
+| STRMN | $5CCB | 1 | Stream number last named by `#n`, OPEN # or CLOSE # (HOME $1412, $221E); read only on the bank-channel paths ($1215, $13F1, $14A3), i.e. used for bus-expansion devices but set for every stream |
 
 ---
 
@@ -260,21 +269,25 @@ Key reminders:
 | Port | Dir | Name | Function |
 |------|-----|------|----------|
 | $FE  | W/R | ULA  | Same as Spectrum |
-| $FF  | W   | DECR | Display Enhancement Control Register |
-| $F4  | W   | HSR  | Horizontal Select Register (bank mapping) |
-| $F5  | W   | —    | AY-3-8910 register select |
-| $F6  | W   | —    | AY-3-8910 data write |
-| $F6  | R   | —    | AY-3-8910 data read (also joystick) |
-| $FB  | R   | —    | Printer BUSY (bit 0) |
+| $FF  | R/W | DECR | Display Enhancement Control Register (read back by the ROMs: HOME $0E0F, EXROM $0E1B `IN A,($FF)`; Technical Manual Table 2.1.13-1) |
+| $F4  | R/W | HSR  | Horizontal Select Register (bank mapping; read back by EXROM bank switching, e.g. $1232 `IN A,($F4)`) |
+| $F5  | W   | —    | AY-3-8912 register select |
+| $F6  | W   | —    | AY-3-8912 data write |
+| $F6  | R   | —    | AY-3-8912 data read (also joystick) |
+| $FB  | R/W | —    | Printer port, same protocol as the Spectrum's ZX Printer port $FB: read bit 0 = encoder pulse, bit 6 = 1 no printer, bit 7 = stylus ready; write bit 1 = slow, bit 2 = motor stop (HOME $0A4A–$0A7A) |
 
-### DECR ($FF write) — TS 2068 Only
+### DECR (port $FF, read/write) — TS 2068 Only
 
 ```
-Bit 0: 1 = enable second display file
-Bit 1: 1 = ultra-high-resolution color (expanded attributes)
-Bit 2: 1 = 64-column mode
-Bit 7: 1 = EXROM enabled  ← must always preserve this bit
+Bits 2-0: video mode field (not independent flags):
+          000 = standard, 001 = second display file,
+          010 = hi-colour (8x1 attributes), 110 = 64-column ($06)
+Bits 5-3: 64-column ink colour (paper is the complement)
+Bit 6:    1 = inhibit the frame interrupt ("17 ms" in the manual; 0 enables it)
+Bit 7:    1 = EXROM, 0 = DOCK for HSR-switched chunks  ← preserve: read the port, change the mode bits, write it back
 ```
+
+See `ts2068_video_and_cartridges.md` for the mode table and its evidence.
 
 ---
 
@@ -299,12 +312,14 @@ $2000–$3FFF   HOME ROM chunk 1 (second 8K)
 $4000–$57FF   Display pixel data (primary)
 $5800–$5AFF   Display attribute data (primary)
 $5C00–$5CCB   System variables (Spectrum-compat + TS 2068-specific)
-$5EEA–$5FFF   SYSCON table
-$6000–$61FF   Function dispatcher (2K, copied from EXROM at boot)
-$6200         Machine stack base (MSTBOT; grows down from here)
-$6800+        CHANS, BASIC program, variables, workspace, calc stack
+$5EEA–        SYSCON table (SYSCON ← $5EEA, EXROM $08E7)
+$6000–$61FF   Machine stack (MSTBOT = $6200; the stack grows down from $6200)
+$6200–$682F   RAM-resident dispatcher and bank-switching code (EXROM $1000–$162F,
+              $0630 bytes, copied by HOME INIT at $0E15)
+$6840+        CHANS (HOME $0D9F: `LD HL,$6840` / `LD (CHANS),HL`), BASIC program,
+              variables, workspace, calc stack
 $3D00–$3FFF   Character set (end of HOME ROM chunk 1)
-EXROM         Extension ROM (8K; contains tape routines, dispatcher code, AROS-INIT)
+EXROM         Extension ROM (8K; tape routines, dispatcher code, cartridge start-up EXTINIT $08E7)
 ```
 
 No equivalent of the Spectrum's contiguous 16K ROM. Code that uses addresses
@@ -329,8 +344,8 @@ above $3FFF for ROM data must be rewritten for the TS 2068.
 - Token storage in custom BASIC line editors (TS2068-only commands use $7B–$7F and $0C)
 - Tape routines called at HOME ROM addresses ($04C2, $0556, $0605, etc.)
 - Any code that assumes a single contiguous 16K ROM at $0000–$3FFF
-- Code that uses Spectrum MAIN-EXEC address ($12A2) — TS 2068 is ~$1B55
-- Code that uses PRINT-A-2 at Spectrum address ($15F2) — TS 2068 is ~$0DD9
+- Code that uses Spectrum MAIN-EXEC address ($12A2) — TS 2068 is $0E28
+- Code that uses PRINT-A-2 at Spectrum address ($15F2) — TS 2068 is $11ED (use RST $10 instead)
 - Code that reads FRAMES at 50 Hz timing (TS 2068 runs at 60 Hz)
 
 ### Use the dispatcher instead of direct ROM calls
@@ -339,7 +354,7 @@ On TS 2068, prefer the function dispatcher for all OS services. This is
 version-independent. See `ts2068_dispatcher.md` for the full service table.
 
 Key dispatcher alternatives for common Spectrum ROM calls:
-- CLS → dispatcher service $22 (K_CLS) or $8D
+- CLS → dispatcher service $8D (K_CLS, the CLS command) or $22 (CLS, primary display file only)
 - PRINT char → service $87 (WRCH) or $1D (SENDTV)
 - LOAD/SAVE/MERGE → services $05 / $07 / $06
 - Select stream → service $29 (SELECT)
@@ -352,14 +367,17 @@ Key dispatcher alternatives for common Spectrum ROM calls:
 **Identical in both machines.** Five bytes:
 
 ```
-Byte 0: Exponent (biased by 128; 0 = number is 0)
+Byte 0: Exponent (biased by 128; 0 = small-integer form, see below)
 Byte 1: Mantissa byte 0 (bit 7 = sign of mantissa when exponent ≠ 0)
 Byte 2: Mantissa byte 1
 Byte 3: Mantissa byte 2
 Byte 4: Mantissa byte 3
 ```
 
-Integer shorthand: exponent = $00, bytes 1-4 = 00, [sign], [hi], [lo]
+Integer form (exponent byte $00): `00, sign ($00/$FF), lo, hi, 00` — the 16-bit
+value is LSB first and two's complement when the sign byte is $FF, so the range is
+−65535…+65535. Zero is the integer `00 00 00 00 00`. (2068 STK_BC $30E9 stores
+`00 00 lo hi 00` via $2E74; STDE_S $314C writes `00, sign, lo, hi, 00`.)
 Full range: ±(~1.7 × 10^38); precision: ~9.5 decimal digits.
 
 ---
@@ -375,15 +393,17 @@ L0066:  PUSH AF
         LD   HL,($5CB0)    ; fetch NMIADD
         LD   A,H
         OR   L
-        JR   NZ, NO-RESET  ; BUG: should be JR Z
-        JP   (HL)          ; jump to handler
+        JR   NZ, NO-RESET  ; BUG: should be JR Z   (2068: $006D = $20)
+        JP   (HL)          ; reached only when HL = 0, i.e. JP $0000
 NO-RESET:
         POP  HL
         POP  AF
         RETN
 ```
 
-Effect: non-zero NMIADD triggers reset; zero NMIADD returns (opposite of documented).
+Effect: zero NMIADD falls through to `JP (HL)` = `JP $0000`, a reset; non-zero NMIADD
+returns without calling the handler (the opposite of the intent). See the Known Bugs
+section of `CLAUDE.md`.
 Sinclair acknowledged the bug but never fixed it in either ROM.
 
 ---
@@ -395,6 +415,6 @@ The Spectrum 48K disassembly in `Spectrum48.txt` uses TASM cross-assembler direc
 - Labels are `Lxxxx:` format (e.g., `L0000:`, `L15F2:`)
 - Section markers use `;;` double-semicolon prefix
 
-The TS 2068 disassembly notes use `~$xxxx` for approximate addresses where the
-exact value is not confirmed. Fixed entry points (RST vectors and explicitly
-anchored code) are given as exact hex addresses.
+TS 2068 addresses in this file are exact and were checked against the stock ROM
+images; the 2068 labels are those of `disassemblies/ts2068_home_rom_U16_stock.txt`
+and `ts2068_exrom_U20_stock.txt`.

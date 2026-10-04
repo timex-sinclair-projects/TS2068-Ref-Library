@@ -144,9 +144,9 @@ LE3:
         PUSH HL
         LD HL,(USRNMI)                  ;get user-defined NMI routine address
         LD A,H
-        OR L                            ;if zero exit
+        OR L                            ;if zero exit [corrected: JR NZ exits when USRNMI is NON-zero (the stock bug)]
         JR NZ,$0070
-        JP (HL)                         ;jump to NMI routine
+        JP (HL)                         ;jump to NMI routine [corrected: reached only when USRNMI = 0, so this is JP $0000 = reset]
 0070:   POP HL                          ;restore registers
         POP AF
         RETN
@@ -745,7 +745,7 @@ BEEP:
         DEFB $03                        ;SUB calc now has the fractional portion of the note value
         DEFB $34,$EC,$6C,$98,$1F,$F5    ;LITERAL 7C6C981FF5 ( 5.77622650453122E-2),0441
         DEFB $04                        ;TIMES
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $0F                        ;ADD
         DEFB $38                        ;QUIT calc now has a factor that represents the ratio of the
 ; requested frequency to a full step in frequency.
@@ -1138,7 +1138,7 @@ MKBLKGR:
         CALL $0673                      ;generate the first four scan lines (bits 0 and 1)
 ;
 ;falling through to here will generate the bit map pattern for bits
-; 2 and 4
+; 2 and 4 [corrected: bits 2 and 3]
 ;
 0673:   RR B                            ;rotate the lsb into the CF
         SBC A,A                         ;if lsb is 1, A=$FF else A=$00
@@ -2888,7 +2888,7 @@ SENDCH:
 ;this trashes A, the character we wish to send
 ; bug?
         LD A,(ARSFLG)                   ;cartridge variable, zero on power up
-        BIT 0,A                         ;jump if AROS is running
+        BIT 0,A                         ;jump if AROS is running [corrected: ARSFLAG bit 0 is the INPUT(1)/PRINT(0) selector — SET 0 by INPUT $222B, RES 0 by PRINT $2159; set → keep the bank channel's input-routine slot, clear → INC HL x2 to its output routine]
         JR NZ,$1215
         INC HL                          ;get the
         INC HL
@@ -3568,7 +3568,7 @@ OPENS:  LD E,6
         JR $14DB
 
 OPENP:  LD E,10H
-14DB:   DEC BC
+14DB:   DEC BC                          ;[corrected: this DEC BC is at $14D8 in the ROM; the OPENK/OPENS JRs are 18 06 / 18 02, i.e. JR $14D8]
         LD A,B
         OR C
         JP NZ,$1470
@@ -5073,7 +5073,7 @@ FOR:
         JR $1C8B
 1C85:   CALL ENDQ
         RST $28                         ;calc entry
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $38                        ;QUIT
 1C8B:   RST $28                         ;calc entry
         DEFB $C0                        ;T -&gt; MEM 0
@@ -5786,7 +5786,7 @@ DEF:
         JR Z,$20E7
 
         RST $28                         ;calc entry
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $38                        ;QUIT
         JR $20E7
 20E0:   CALL TEM6
@@ -5845,9 +5845,9 @@ SOUND:
         DEC A                           ;jump if A &gt;= $80
         INC A
         JP M ,$1BED                     ;error - BAD BASIC
-        OUT ($F5),A                     ;output register number to AY8910 address register
+        OUT ($F5),A                     ;output register number to AY8910 address register [corrected: the chip is the AY-3-8912 (Technical Manual §2.1.6)]
         POP AF                          ;get the data value
-        OUT ($F6),A                     ;output to the AY8910 data register
+        OUT ($F6),A                     ;output to the AY8910 data register [corrected: AY-3-8912]
 2146:   RST $18                         ;get current character
         CP ';'                          ;jump back around for the next
         JR Z,$2127                      ;set of arguments
@@ -6826,7 +6826,7 @@ DRAW:
         CALL ENDQ
         RST $28                         ;calc entry
         DEFB $C5                        ;T -&gt; MEM 5
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $04                        ;TIMES
         DEFB $1F                        ;SIN
         DEFB $31                        ;DUP
@@ -6878,7 +6878,7 @@ DRAW:
         DEFB $E5                        ;MEM 5 -&gt; T
         DEFB $E0                        ;MEM 0 -&gt; T
         DEFB $03                        ;SUB
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $04                        ;TIMES
         DEFB $31                        ;DUP
         DEFB $1F                        ;SIN
@@ -7033,7 +7033,7 @@ DRAW:
         DEFB $C4                        ;T -&gt; MEM 4
         DEFB $02                        ;DROP
         DEFB $31                        ;DUP
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $04                        ;TIMES
         DEFB $1F                        ;SIN
         DEFB $C1                        ;T -&gt; MEM 1
@@ -7044,7 +7044,7 @@ DRAW:
         DEFB $04                        ;TIMES
         DEFB $31                        ;DUP
         DEFB $0F                        ;ADD
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $1B                        ;NEGATE
         DEFB $C3                        ;T -&gt; MEM 3
@@ -7331,7 +7331,7 @@ F_ATTR:
 2971:   RST $18                         ;get current character
         INC HL
         PUSH HL
-2975:   LD BC,$0000
+2975:   LD BC,$0000                ; [corrected: this instruction is at $2974]
         CALL $2868
 ; DEFB $CD,$68,$28
         JR NZ,$2997
@@ -7379,14 +7379,14 @@ RND:
         LD BC,(SEED)
         CALL STK_BC
         RST $28                         ;calc entry
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $0F                        ;ADD
         DEFB $34,$37,$16                ;LITERAL 8716000000 ( 75),29C8
         DEFB $04                        ;TIMES
         DEFB $34,$80,$41,$00,$00,$80    ;LITERAL 9100008000 ( 65537),29CF
         DEFB $32                        ;INTDIV
         DEFB $02                        ;DROP
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $31                        ;DUP
         DEFB $38                        ;QUIT
@@ -8568,7 +8568,7 @@ STKNUM:
         DEFB $38                        ;QUIT
 
 3093:   RST $28                         ;calc entry
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $C0                        ;T -&gt; MEM 0 (MEM 0 contains fp 1)
         DEFB $02                        ;DROP
         DEFB $38                        ;QUIT
@@ -8578,7 +8578,7 @@ STKNUM:
         JR C,$30A9                      ;a decimal digit
         RST $28                         ;calc entry
         DEFB $E0                        ;MEM 0 -&gt; T
-        DEFB $A4                        ;CONST 4 (2560)
+        DEFB $A4                        ;CONST 4 (2560) [corrected: stacks 10, not 2560]
         DEFB $05                        ;DIV
         DEFB $C0                        ;T -&gt; MEM 0
         DEFB $04                        ;TIMES
@@ -8692,7 +8692,7 @@ ININT:
 
         RST $28                         ;calc entry
         DEFB $01                        ;SWAP digit to the top of the stack
-        DEFB $A4                        ;CONST 4 (2560)
+        DEFB $A4                        ;CONST 4 (2560) [corrected: stacks 10, not 2560]
         DEFB $04                        ;TIMES
         DEFB $0F                        ;ADD
         DEFB $38                        ;QUIT
@@ -8712,7 +8712,7 @@ FP_XEY:
         LD HL,MEMBOT
         CALL $3926
         RST $28                         ;calc entry
-        DEFB $A4                        ;CONST 4 (2560)
+        DEFB $A4                        ;CONST 4 (2560) [corrected: stacks 10, not 2560]
         DEFB $38                        ;QUIT
         POP AF
 311E:   SRL A
@@ -8801,11 +8801,11 @@ STDE_S:
 ; makes the top of the calculator stack an integer by rounding
 ; if it's a floating point value.
 ; RETURNS:
-; DE = integer value of calculator (bombs out via calculator's
-; integer routine if the number is too large)
+; DE = integer value of calculator (bombs out via calculator's [corrected: result is returned in BC; DE is preserved]
+; integer routine if the number is too large) [corrected: it does not bomb out: CF=1 if the value exceeded 65535]
 ; A = copy of E
-; ZF = 1 if the result was an integer
-; CF = 1 if the sign byte was not zero
+; ZF = 1 if the result was an integer [corrected: ZF=1 if positive, ZF=0 if negative (BIT 7 of the sign byte)]
+; CF = 1 if the sign byte was not zero [corrected: CF=1 if the exponent byte was not zero, i.e. out of range]
 ;******************************************************************
 FP2BC:
 3160:   RST $28                         ;calc entry /this construct loads HL with the
@@ -8815,7 +8815,7 @@ FP2BC:
         JR Z,$316B                      ;an integer
 
         RST $28                         ;calc entry round the value on the calc stack
-        DEFB $A2                        ;CONST 1 (0.5) (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) (0.5) [corrected: CONST 2 = 0.5]
         DEFB $0F                        ;ADD
         DEFB $27                        ;INT
         DEFB $38                        ;QUIT
@@ -8826,12 +8826,12 @@ FP2BC:
         PUSH HL                         ;save the registers
         PUSH DE                         ;DE contains the address of the dropped value
         EX DE,HL                        ;HL now points to the dropped value
-        LD B,(HL)                       ;save the sign byte
+        LD B,(HL)                       ;save the sign byte [corrected: B = exponent byte; 0 means small-integer form]
         CALL INT2COMPL                  ;form the 2s complement of the value at (HL) and put it
 ; into DE
         XOR A                           ;clear the accumulator
-        SUB B                           ;this will set the carry if the result is not an integer
-        BIT 7,C                         ;this will set the zero flag if the sign is negative
+        SUB B                           ;this will set the carry if the result is not an integer [corrected: CF=1 if B (exponent) &lt;&gt; 0, i.e. &gt; 65535]
+        BIT 7,C                         ;this will set the zero flag if the sign is negative [corrected: ZF=1 if positive]
         LD B,D                          ;transfer the newly minted value to BC
         LD C,E
         LD A,E                          ;copy E to A
@@ -8856,19 +8856,19 @@ FP2BC:
 ; Module: INOUT
 ; Routine: FP2A
 ; convert the top of the fp stack to an integer in A
-; B will contain the sign byte of the original value
-; carry will be set if the value was negative
+; B will contain the sign byte of the original value [corrected: B = high byte of the value]
+; carry will be set if the value was negative [corrected: CF=1 if the value is out of range (&gt; 255)]
 ; zero will be set if the value was positive
 ;******************************************************************
 FP2A:
 3193:   CALL FP2BC                      ;convert the top of fp stack to BC
-        RET C                           ;return if number was greater than 255
+        RET C                           ;return if number was greater than 255 [corrected: from FP2BC, CF=1 means &gt; 65535]
         PUSH AF                         ;save a
         DEC B
-        INC B                           ;jump if the sign byte is 0
+        INC B                           ;jump if the sign byte is 0 [corrected: jump if the high byte is 0]
         JR Z,$319F
         POP AF                          ;restore the value
-        SCF                             ;set carry as value was negative
+        SCF                             ;set carry as value was negative [corrected: value was &gt; 255]
         RET                             ;return
 319F:   POP AF                          ;restore the value
         RET                             ;restore the value
@@ -9920,10 +9920,10 @@ FP_FLOAT:
 ;******************************************************************
 FPCONST:
         DEFB $00,$B0,$00                ;0000000000 ( 0),3687
-        DEFB $40,$B0,$00,$01            ;0000010000 ( 256),368B
+        DEFB $40,$B0,$00,$01            ;0000010000 ( 256),368B [corrected: = 1; integer form is 00 sign lo hi 00]
         DEFB $30,$00                    ;8000000000 ( .5),368D
         DEFB $F1,$49,$0F,$DA,$A2        ;81490FDAA2 ( 1.57079632673413),3692
-        DEFB $40,$B0,$00,$0A            ;00000A0000 ( 2560),3696
+        DEFB $40,$B0,$00,$0A            ;00000A0000 ( 2560),3696 [corrected: = 10]
 ;******************************************************************
 ; Module: CALC
 ; Routine: FPJMPTBL
@@ -9990,11 +9990,11 @@ FPJMPTBL:
         DEFW $35D3                      ;TRUNC FP_TRUNC
         DEFW $3761                      ;XEQTB FP_XEQTB
         DEFW $310D                      ;XEY FP_XEY
-        DEFW $3656                      ;CBSV FP_FLOAT
-        DEFW $3808                      ;GET CONST
-        DEFW $37DA                      ;TO MEM FP_TO_MEM
-        DEFW $37EC                      ;FROM MEM FP_FROM_MEM
-        DEFW $37CE                      ;?? FP_UNKNOWN
+        DEFW $3656                      ;CBSV FP_FLOAT [corrected: $3D FLOAT (re-stack); calc bytes $80-$9F (CBSV n) dispatch via entry $3E]
+        DEFW $3808                      ;GET CONST [corrected: $3E SERIES generator (CBSV), used by calc bytes $80-$9F]
+        DEFW $37DA                      ;TO MEM FP_TO_MEM [corrected: $3F GET CONST (stack constant), used by calc bytes $A0-$BF]
+        DEFW $37EC                      ;FROM MEM FP_FROM_MEM [corrected: $40 T -&gt; MEM n, used by calc bytes $C0-$DF]
+        DEFW $37CE                      ;?? FP_UNKNOWN [corrected: $41 MEM n -&gt; T, used by calc bytes $E0-$FF]
 ;******************************************************************
 ; Module: CALC
 ; Routine: UNKNOWN
@@ -10165,7 +10165,7 @@ ARRAY:
         ADD HL,BC
         RET
 
-FP_UNKNOWN:
+FP_UNKNOWN:                     ; [corrected: $37CE is MEM n -&gt; T (get-mem): copies MEM entry n to the calc stack]
         PUSH DE
         LD HL,(MEM)
         CALL $37C5
@@ -10173,7 +10173,7 @@ FP_UNKNOWN:
         POP HL
         RET
 
-FP_TO_MEM:
+FP_TO_MEM:                     ; [corrected: $37DA is GET CONST (stk-const): skips n constants in FPCONST at $3684, then stacks the next]
         LD H,D
         LD L,E
         EXX
@@ -10187,7 +10187,7 @@ FP_TO_MEM:
         EXX
         RET
 
-FP_FROM_MEM:
+FP_FROM_MEM:                     ; [corrected: $37EC is T -&gt; MEM n (st-mem): copies the top of the calc stack into MEM entry n]
         PUSH HL
         EX DE,HL
         LD HL,(MEM)
@@ -10211,29 +10211,29 @@ FP_SWAP:
         EX DE,HL
         RET
 
-;FP_FLOAT:
-        LD B,A                          ;47
-        CALL $371D                      ;CD1D37
-        LD SP,$C00F                     ;310FC0
-        LD (BC),A                       ;02
-        AND B                           ;A0
-; JP NZ,$E031
-        DEFB $C2,$31,$E0                ;C231E0
-        INC B                           ;04
-; JP PO ,$03C1
-        DEFB $E2,$C1,$03                ;E2C103
-; JR C,$37E7
-        DEFB $38,$CD                    ;38CD
-        ADD A,L                         ;85
-        SCF                             ;37
-        CALL $3721                      ;CD2137
-        RRCA                            ;0F
-        LD BC,$02C2                     ;01C202
-        DEC (HL)                        ;35
-        XOR $E1                         ;EEE1
-        INC BC                          ;03
-; JR C,$37F2
-        DEFB $38,$C9                    ;38C9
+;FP_FLOAT: [corrected: $3808 is the SERIES generator (calc table entry $3E, calc bytes $80-$9F), not code: the bytes after each CALL are calculator literals]
+        LD B,A                          ;47 [corrected: B = series length]
+        CALL $371D                      ;CD1D37 [corrected: enter calculator (GEN-ENT-1 equivalent)]
+        LD SP,$C00F                     ;310FC0 [corrected: calc bytes DUP, ADD, T -&gt; MEM 0]
+        LD (BC),A                       ;02 [corrected: calc byte DROP]
+        AND B                           ;A0 [corrected: calc byte CONST 0]
+; JP NZ,$E031 [corrected: not code]
+        DEFB $C2,$31,$E0                ;C231E0 [corrected: T -&gt; MEM 2; $3812 loop start: DUP, MEM 0 -&gt; T]
+        INC B                           ;04 [corrected: calc byte TIMES]
+; JP PO ,$03C1 [corrected: not code]
+        DEFB $E2,$C1,$03                ;E2C103 [corrected: MEM 2 -&gt; T, T -&gt; MEM 1, SUB]
+; JR C,$37E7 [corrected: not code]
+        DEFB $38,$CD                    ;38CD [corrected: QUIT, then $CD = CALL $3785 (stack next coefficient)]
+        ADD A,L                         ;85 [corrected: operand of CALL $3785]
+        SCF                             ;37 [corrected: operand of CALL $3785]
+        CALL $3721                      ;CD2137 [corrected: re-enter calculator (GEN-ENT-2 equivalent)]
+        RRCA                            ;0F [corrected: calc byte ADD]
+        LD BC,$02C2                     ;01C202 [corrected: calc bytes SWAP, T -&gt; MEM 2, DROP]
+        DEC (HL)                        ;35 [corrected: calc byte LOOP]
+        XOR $E1                         ;EEE1 [corrected: LOOP displacement $EE (to $3812), then MEM 1 -&gt; T]
+        INC BC                          ;03 [corrected: calc byte SUB]
+; JR C,$37F2 [corrected: not code]
+        DEFB $38,$C9                    ;38C9 [corrected: QUIT, then RET]
 
 FP_ABS:
         LD B,$FF                        ;06FF
@@ -10830,7 +10830,7 @@ FP_INT:
         DEFB $01                        ;MINUSQ SWAP
         DEFB $30                        ;NOT
         DEFB $00,$03                    ;IFJUMP 3ADD
-        DEFB $A1                        ;DUP CONST 1 (256)
+        DEFB $A1                        ;DUP CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;MINUSQ SUB
         DEFB $38                        ;QUIT
         RET
@@ -10849,7 +10849,7 @@ FP_EXP:
         DEFB $03                        ;SUB
         DEFB $31                        ;DUP
         DEFB $0F                        ;ADD
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $88                        ;CBSV 8
         DEFB $13,$36                    ;6336000000 ( 1.32422428578138E-9),3AF3
@@ -10915,7 +10915,7 @@ FP_LN:
         DEFB $37                        ;PLUSQ
         DEFB $00,$08                    ;IFJUMP 3B58
         DEFB $01                        ;SWAP
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $01                        ;SWAP
         DEFB $38                        ;QUIT
@@ -10925,14 +10925,14 @@ FP_LN:
         DEFB $34,$F0,$31,$72,$17,$F8    ;LITERAL 80317217F8 ( .693147180601954),3B5F
         DEFB $04                        ;TIMES
         DEFB $01                        ;SWAP
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $03                        ;SUB
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $03                        ;SUB
         DEFB $31                        ;DUP
         DEFB $34,$32,$20                ;LITERAL 8220000000 ( 2.5),3B69
         DEFB $04                        ;TIMES
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $03                        ;SUB
         DEFB $8C                        ;CBSV 12
         DEFB $11,$AC                    ;61AC000000 (-3.12866177409887E-10),3B6F
@@ -10962,7 +10962,7 @@ FP_ANGLE:
         DEFB $34,$EE,$22,$F9,$83,$6E    ;LITERAL 7E22F9836E ( .1591549430741),3BA6
         DEFB $04                        ;TIMES
         DEFB $31                        ;DUP
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $0F                        ;ADD
         DEFB $27                        ;INT
         DEFB $03                        ;SUB
@@ -10972,7 +10972,7 @@ FP_ANGLE:
         DEFB $0F                        ;ADD
         DEFB $31                        ;DUP
         DEFB $2A                        ;ABS
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $31                        ;DUP
         DEFB $37                        ;PLUSQ
@@ -10981,7 +10981,7 @@ FP_ANGLE:
         DEFB $02                        ;DROP
         DEFB $38                        ;QUIT
         DEFB $C9                        ;RET
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $01                        ;SWAP
         DEFB $36                        ;MINUSQ
@@ -10997,7 +10997,7 @@ FP_COS:
         RST $28                         ;calc entry
         DEFB $39                        ;ANGLE
         DEFB $2A                        ;ABS
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $E0                        ;MEM 0 -&gt; T
         DEFB $00,$06                    ;IFJUMP 3BD2
@@ -11016,7 +11016,7 @@ FP_SIN:
         DEFB $04                        ;TIMES
         DEFB $31                        ;DUP
         DEFB $0F                        ;ADD
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $86                        ;CBSV 6
         DEFB $14,$E6                    ;64E6000000 (-3.34694050252438E-9),3BDC
@@ -11052,7 +11052,7 @@ FP_ATN:
         CP $81
         JR C,$3C13
         RST $28                         ;calc entry
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $1B                        ;NEGATE
         DEFB $01                        ;SWAP
         DEFB $05                        ;DIV
@@ -11071,7 +11071,7 @@ FP_ATN:
         DEFB $04                        ;TIMES
         DEFB $31                        ;DUP
         DEFB $0F                        ;ADD
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $8C                        ;CBSV 12
         DEFB $10,$B2                    ;60B2000000 (-1.61890056915581E-10),3C20
@@ -11100,11 +11100,11 @@ FP_ASN:
         DEFB $31                        ;DUP
         DEFB $31                        ;DUP
         DEFB $04                        ;TIMES
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $03                        ;SUB
         DEFB $1B                        ;NEGATE
         DEFB $28                        ;ROOT
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $0F                        ;ADD
         DEFB $05                        ;DIV
         DEFB $24                        ;ATN
@@ -11133,7 +11133,7 @@ FP_ROOT:
         DEFB $31                        ;DUP
         DEFB $30                        ;NOT
         DEFB $00,$1E                    ;IFJUMP 3C87
-        DEFB $A2                        ;CONST 1 (0.5)
+        DEFB $A2                        ;CONST 1 (0.5) [corrected: CONST 2 = 0.5]
         DEFB $38                        ;QUIT
 ;******************************************************************
 ; Module: FUNCTS
@@ -11157,11 +11157,11 @@ FP_TO_THE:
         DEFB $01                        ;SWAP
         DEFB $37                        ;PLUSQ
         DEFB $00,$06                    ;IFJUMP 3C87
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $01                        ;SWAP
         DEFB $05                        ;DIV
         DEFB $02                        ;DROP
-        DEFB $A1                        ;CONST 1 (256)
+        DEFB $A1                        ;CONST 1 (256) [corrected: stacks 1, not 256]
         DEFB $38                        ;QUIT
         RET
 ;******************************************************************
