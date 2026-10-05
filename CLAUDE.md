@@ -128,6 +128,7 @@ Installed at `~/z88dk/z88dk/`. Environment variables in `~/.zshrc`:
 | `Timex Sinclair 2068 Technical Manual (best).pdf` | The Technical Reference Manual, 401 pages. **Not a scan** — born-digital (Word → PostScript → Ghostscript, 2016), so the text layer is real text. See the caveats in `technical-manual/README.md` before trusting it |
 | `technical-manual/` | The narrative half of that manual (pages 1–104) as markdown chapters, with page-render figures. Start at `technical-manual/README.md` |
 | `dreger-machine-code/` | Dr. Lloyd Dreger, *Introduction to 2068 Machine Code* (1986): a corrected, ROM-checked transcription in 14 chapter files. **Secondary source** — every claim checked against the stock ROMs; corrections and caveats are in the footnotes ("Corrected against the ROM.", "Library note:", "(unverified)"). Start at `dreger-machine-code/README.md`. Not GPL — see its `NOTICE.md` |
+| `aker-basics-and-beyond/` | Sharon Zardetto Aker, *T/S 2068 Basics and Beyond* (1985): **not a transcription** (in-copyright book) — an own-words digest of its BASIC-level claims with page refs, a ROM cross-check (`cross-check.md`), and `ts2068-basic-tidbits.md`, a checked list of BASIC behaviour/speed tips. Aker is wrong on NOT priority, coordinate rounding, FOR reuse, UDG count and SOUND tuning octave — see `cross-check.md` |
 
 **`docs/dreger-machine-code/`** is a 1986 tutorial, not a reference. It is useful
 for its worked explanations of the 5-byte number format, the RST 28h calculator,
