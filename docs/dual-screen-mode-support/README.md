@@ -150,9 +150,13 @@ its listing describes, except for four bugs in the original code:
   `$7B00`, and BASIC stopped with report C.
 - **SCROLL accepts a starting line of 0.** It validates only count ≥ 1 and
   1 ≤ first + count ≤ 24, but it moves each line into the one above. From
-  line 0 on DF2, the pixel moves for the top block use `HL−$720`, which
-  lands in DF1's attribute file, and two rows of DF1 attributes were zeroed.
-  It still returns 0.
+  line 0 on DF2, the pixel moves for the top block use `HL−$720`. That writes
+  line 0's eight pixel rows to `$58E0`, `$59E0` … `$5FE0`, one every `$100`.
+  In the test, two rows of DF1 attributes were zeroed. The end of the printer
+  buffer changed, and so did the reserved area at `$5CE0`–`$5EF6`, which
+  includes the start of the SYSCON table at `$5EEA`. (An earlier revision of
+  this note mentioned only the attributes.) It still returns 0, and BASIC kept
+  running. On DF1 the same writes land in ROM and are lost.
 
 - **CLRSCN and SCROLL miss 8-bit overflow.** Both check `first + count` with
   `ADD A,C / CP 1 / CP 25`, with no carry test, so first line 250 with count
