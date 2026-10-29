@@ -22,3 +22,7 @@ tspico-d-error-team-summary.txt
 
 # Cowork session output
 Claude outputs/
+
+# ---- Obsidian ----------------------------------------------------------------
+# The vault's settings, workspace layout and plugins are local to each machine.
+.obsidian/
